@@ -1,22 +1,20 @@
 from fastapi import (
-    FastAPI, APIRouter, HTTPException, Depends, status,
-    Body, Form, Request as FastAPIRequest, Query
+    FastAPI, APIRouter, HTTPException, Depends,
+    Body, Form, Query, Request as FastAPIRequest
 )
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
+import os, logging, uuid
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional
-import uuid
+from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
 
-# === Rate limiting (SlowAPI) ===
+# Rate limiting (SlowAPI)
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -31,7 +29,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
 # ---- Security & JWT ----
-SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key-change-in-production")
+SECRET_KEY = os.environ.get("SECRET_KEY", "change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
@@ -55,6 +53,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ============================
 #            Models
 # ============================
+RequestType = Literal["Soporte", "Mejora", "Desarrollo", "Capacitación"]
+RequestChannel = Literal["WhatsApp", "Correo", "Sistema"]
+RequestStatus = Literal["Pendiente", "En progreso", "En revisión", "Finalizada", "Rechazada"]
+
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     username: str
@@ -86,35 +88,73 @@ class Department(BaseModel):
     description: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-# Nota: mantenemos el nombre "Request" para tu modelo de solicitud,
-# pero usamos FastAPIRequest (alias) para el objeto Request de FastAPI.
+class StateEvent(BaseModel):
+    from_status: Optional[RequestStatus] = None
+    to_status: RequestStatus
+    at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    by_user_id: str
+    by_user_name: str
+
+class Feedback(BaseModel):
+    rating: Literal["up", "down"]
+    comment: Optional[str] = None
+    at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    by_user_id: str
+    by_user_name: str
+
 class Request(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     title: str
     description: str
-    priority: str          # "Alta", "Media", "Baja"
-    process_type: str
-    status: str = "Pendiente"  # "Pendiente", "En progreso", "Completada", "Rechazada"
+    priority: Literal["Alta", "Media", "Baja"]
+    type: RequestType
+    channel: RequestChannel
+    level: Optional[int] = None            # 1|2|3
+    status: RequestStatus = "Pendiente"
     requester_id: str
     requester_name: str
     department: str
     assigned_to: Optional[str] = None
     assigned_to_name: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    estimated_due: Optional[datetime] = None
+    requested_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completion_date: Optional[datetime] = None
+    state_history: List[StateEvent] = Field(default_factory=list)
+    feedback: Optional[Feedback] = None
 
 class RequestCreate(BaseModel):
     title: str
     description: str
-    priority: str
-    process_type: str
+    priority: Literal["Alta", "Media", "Baja"]
+    type: RequestType
+    channel: RequestChannel = "Sistema"
+    requested_at: Optional[datetime] = None
 
 class RequestUpdate(BaseModel):
-    status: str
+    status: Optional[RequestStatus] = None
     assigned_to: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    estimated_due: Optional[datetime] = None
 
-# ---- Respuesta paginada ----
+class ClassifyPayload(BaseModel):
+    level: int = Field(ge=1, le=3)
+    priority: Literal["Alta", "Media", "Baja"]
+
+class AssignPayload(BaseModel):
+    assigned_to: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    estimated_due: Optional[datetime] = None
+
+class TransitionPayload(BaseModel):
+    to_status: RequestStatus
+
+class FeedbackPayload(BaseModel):
+    rating: Literal["up", "down"]
+    comment: Optional[str] = None
+
 class PaginatedRequests(BaseModel):
     items: List[Request]
     page: int
@@ -135,9 +175,7 @@ def get_password_hash(password):
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -163,6 +201,18 @@ def require_role(required_roles: List[str]):
         return current_user
     return role_checker
 
+ALLOWED_TRANSITIONS: Dict[RequestStatus, set] = {
+    "Pendiente": {"En progreso", "Rechazada"},
+    "En progreso": {"En revisión"},
+    "En revisión": {"Finalizada", "En progreso"},
+    "Finalizada": set(),
+    "Rechazada": set(),
+}
+
+def ensure_transition(old: RequestStatus, new: RequestStatus):
+    if new not in ALLOWED_TRANSITIONS[old]:
+        raise HTTPException(status_code=400, detail=f"Transición no permitida: {old} → {new}")
+
 # === Anti-brute force with Mongo TTL ===
 async def ensure_security_indexes():
     try:
@@ -171,14 +221,18 @@ async def ensure_security_indexes():
     except Exception:
         pass
 
-# ---- Índices núcleo para rendimiento/búsqueda ----
+# ---- Core indexes ----
 async def ensure_core_indexes():
     try:
         await db.requests.create_index([("created_at", -1)])
+        await db.requests.create_index([("requested_at", -1)])
         await db.requests.create_index([("department", 1)])
         await db.requests.create_index([("status", 1)])
         await db.requests.create_index([("requester_id", 1)])
         await db.requests.create_index([("assigned_to", 1)])
+        await db.requests.create_index([("type", 1)])
+        await db.requests.create_index([("level", 1)])
+        await db.requests.create_index([("channel", 1)])
         await db.requests.create_index([("title", "text"), ("description", "text")])
         await db.users.create_index([("username", 1)], unique=True)
         await db.departments.create_index([("name", 1)], unique=True)
@@ -200,14 +254,14 @@ async def is_locked(username: str, ip: str, threshold: int, window_min: int) -> 
     return count >= threshold
 
 # ============================
-#      Initialize sample data
+#      Seed sample data
 # ============================
 async def init_data():
-    # Avoid reseeding
     existing_user = await db.users.find_one({"role": "admin"})
     if existing_user:
         return
 
+    # Departments
     departments_data = [
         {"name": "Facturación", "description": "Gestión de facturación y cobros"},
         {"name": "Inventario", "description": "Control y gestión de inventarios"},
@@ -218,10 +272,10 @@ async def init_data():
         {"name": "Atención al Cliente", "description": "Servicio y soporte al cliente"},
         {"name": "Creación de Anuncios", "description": "Marketing y publicidad"},
     ]
-    for dept_data in departments_data:
-        dept = Department(**dept_data)
-        await db.departments.insert_one(dept.dict())
+    for d in departments_data:
+        await db.departments.insert_one(Department(**d).dict())
 
+    # Users
     users_data = [
         {"username": "admin", "password": "admin123", "full_name": "Administrador Sistema",
          "department": "Directivos", "position": "Jefe de departamento", "role": "admin"},
@@ -238,33 +292,43 @@ async def init_data():
         {"username": "rrhh1", "password": "user123", "full_name": "Laura Torres",
          "department": "Recursos Humanos", "position": "Jefe de departamento", "role": "employee"},
     ]
-    for user_data in users_data:
-        user_dict = user_data.copy()
-        user_dict["password"] = get_password_hash(user_data["password"])
-        user = User(**{k: v for k, v in user_dict.items() if k != "password"})
-        user_doc = user.dict()
-        user_doc["password_hash"] = user_dict["password"]
+    username_to_doc: Dict[str, dict] = {}
+    for u in users_data:
+        hashed = get_password_hash(u["password"])
+        user_doc = User(**{k: v for k, v in u.items() if k != "password"}).dict()
+        user_doc["password_hash"] = hashed
         await db.users.insert_one(user_doc)
+        username_to_doc[u["username"]] = user_doc
 
-    requests_data = [
-        {"title": "Automatizar proceso de facturación mensual",
-         "description": "Necesitamos automatizar la generación de facturas recurrentes para clientes con contratos mensuales",
-         "priority": "Alta", "process_type": "Facturación", "status": "Pendiente",
-         "requester_id": "facturacion1", "requester_name": "Carlos López", "department": "Facturación"},
-        {"title": "Sistema de alertas de stock bajo",
-         "description": "Implementar notificaciones automáticas cuando el inventario de productos esté por debajo del mínimo",
-         "priority": "Media", "process_type": "Inventario", "status": "En progreso",
-         "requester_id": "inventario1", "requester_name": "Ana Martínez", "department": "Inventario",
-         "assigned_to": "soporte1", "assigned_to_name": "Juan Pérez"},
-        {"title": "Reporte automático de ventas diarias",
-         "description": "Generar reportes automáticos de ventas que se envíen por email todos los días",
-         "priority": "Media", "process_type": "Reportes", "status": "Completada",
-         "requester_id": "comercial1", "requester_name": "Pedro Sánchez", "department": "Comerciales",
-         "assigned_to": "soporte2", "assigned_to_name": "María González",
+    admin_id = username_to_doc["admin"]["id"]
+
+    # Requests de ejemplo (con IDs reales)
+    sample_reqs = [
+        {"title": "Automatizar facturación mensual",
+         "description": "Generar facturas recurrentes para contratos mensuales",
+         "priority": "Alta", "status": "Pendiente",
+         "type": "Desarrollo", "channel": "Sistema", "level": 3,
+         "requester_id": username_to_doc["facturacion1"]["id"], "requester_name": "Carlos López", "department": "Facturación"},
+        {"title": "Alertas de stock bajo",
+         "description": "Notificaciones cuando el inventario esté por debajo del mínimo",
+         "priority": "Media", "status": "En progreso",
+         "type": "Mejora", "channel": "Sistema", "level": 2,
+         "requester_id": username_to_doc["inventario1"]["id"], "requester_name": "Ana Martínez", "department": "Inventario",
+         "assigned_to": username_to_doc["soporte1"]["id"], "assigned_to_name": "Juan Pérez"},
+        {"title": "Reporte de ventas diarias",
+         "description": "Enviar reporte automático diario por email",
+         "priority": "Media", "status": "Finalizada",
+         "type": "Mejora", "channel": "Correo", "level": 2,
+         "requester_id": username_to_doc["comercial1"]["id"], "requester_name": "Pedro Sánchez", "department": "Comerciales",
+         "assigned_to": username_to_doc["soporte2"]["id"], "assigned_to_name": "María González",
          "completion_date": datetime.now(timezone.utc) - timedelta(days=5)},
     ]
-    for req_data in requests_data:
-        req = Request(**req_data)
+    for rd in sample_reqs:
+        req = Request(**rd)
+        req.state_history.append(StateEvent(
+            from_status=None, to_status=req.status,
+            by_user_id=admin_id, by_user_name="Administrador Sistema"
+        ))
         await db.requests.insert_one(req.dict())
 
 # ============================
@@ -278,7 +342,6 @@ async def login(
     username: Optional[str] = Form(default=None),
     password: Optional[str] = Form(default=None),
 ):
-    # 1) Aceptar JSON (UserLogin) o FormData/x-www-form-urlencoded
     if user_login is None:
         if username and password:
             user_login = UserLogin(username=username, password=password)
@@ -293,22 +356,16 @@ async def login(
     if user_login is None:
         raise HTTPException(status_code=422, detail="username/password required")
 
-    # 2) Anti fuerza-bruta
     ip = get_remote_address(request)
     if await is_locked(user_login.username, ip, LOGIN_LOCK_THRESHOLD, LOGIN_LOCK_WINDOW_MIN):
         raise HTTPException(status_code=429, detail="Demasiados intentos fallidos. Inténtalo más tarde.")
 
-    # 3) Autenticar
     user_doc = await db.users.find_one({"username": user_login.username})
     if not user_doc or not verify_password(user_login.password, user_doc["password_hash"]):
         await record_failed_login(user_login.username, ip, LOGIN_LOCK_WINDOW_MIN)
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-    # 4) Token
-    access_token = create_access_token(
-        data={"sub": user_doc["username"]},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+    access_token = create_access_token(data={"sub": user_doc["username"]})
     return {"access_token": access_token, "token_type": "bearer"}
 
 @api_router.get("/auth/me", response_model=User)
@@ -321,7 +378,6 @@ async def create_user(user: UserCreate, current_user: User = Depends(require_rol
     existing_user = await db.users.find_one({"username": user.username})
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
-
     user_dict = user.dict()
     password_hash = get_password_hash(user_dict.pop("password"))
     new_user = User(**user_dict)
@@ -343,52 +399,64 @@ async def get_departments(current_user: User = Depends(get_current_user)):
 
 # ---- Requests ----
 @api_router.post("/requests", response_model=Request)
-async def create_request(request: RequestCreate, current_user: User = Depends(get_current_user)):
+async def create_request(payload: RequestCreate, current_user: User = Depends(get_current_user)):
+    data = payload.dict(exclude_unset=True)
+    if not data.get("requested_at"):
+        data["requested_at"] = datetime.now(timezone.utc)
     new_request = Request(
-        **request.dict(),
+        **data,
         requester_id=current_user.id,
         requester_name=current_user.full_name,
         department=current_user.department,
     )
+    new_request.state_history.append(StateEvent(
+        from_status=None, to_status=new_request.status,
+        by_user_id=current_user.id, by_user_name=current_user.full_name
+    ))
     await db.requests.insert_one(new_request.dict())
     return new_request
 
-# Nuevo: GET /requests paginado + filtros + orden
 @api_router.get("/requests", response_model=PaginatedRequests)
 async def get_requests(
     current_user: User = Depends(get_current_user),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=int(os.environ.get("MAX_PAGE_SIZE", "50"))),
-    status: Optional[str] = Query(None, description="Pendiente|En progreso|Completada|Rechazada"),
+    status: Optional[RequestStatus] = Query(None),
     department: Optional[str] = Query(None),
-    q: Optional[str] = Query(None, description="Texto a buscar en título/descripción"),
-    sort: Optional[str] = Query("-created_at", description="Campo a ordenar, ej: -created_at o created_at"),
+    q: Optional[str] = Query(None, description="Texto en título/descripción"),
+    sort: Optional[str] = Query("-created_at"),
+    request_type: Optional[RequestType] = Query(None, alias="type"),
+    level: Optional[int] = Query(None, ge=1, le=3),
+    assigned_to: Optional[str] = Query(None),
+    channel: Optional[RequestChannel] = Query(None),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
 ):
-    # ----- Filtros -----
-    filt: dict = {}
+    filt: Dict[str, Any] = {}
     if current_user.role == "employee":
         filt["requester_id"] = current_user.id
-    if status:
-        filt["status"] = status
-    if department:
-        filt["department"] = department
-    if q:
-        filt["$text"] = {"$search": q}
+    if status: filt["status"] = status
+    if department: filt["department"] = department
+    if request_type: filt["type"] = request_type
+    if level: filt["level"] = level
+    if assigned_to: filt["assigned_to"] = assigned_to
+    if channel: filt["channel"] = channel
+    if date_from or date_to:
+        dr: Dict[str, Any] = {}
+        if date_from: dr["$gte"] = date_from
+        if date_to: dr["$lte"] = date_to
+        filt["requested_at"] = dr
+    if q: filt["$text"] = {"$search": q}
 
-    # ----- Orden -----
-    sort_field = "created_at"
-    sort_dir = -1  # desc
+    sort_field = "created_at"; sort_dir = -1
     if sort:
         if sort.startswith("-"):
-            sort_field = sort[1:]
-            sort_dir = -1
+            sort_field = sort[1:]; sort_dir = -1
         else:
-            sort_field = sort
-            sort_dir = 1
-    if sort_field not in {"created_at", "status", "department"}:
+            sort_field = sort; sort_dir = 1
+    if sort_field not in {"created_at", "status", "department", "requested_at", "priority", "level"}:
         sort_field = "created_at"
 
-    # ----- Conteo + página -----
     total = await db.requests.count_documents(filt)
     total_pages = max((total + page_size - 1) // page_size, 1)
     page = min(page, total_pages)
@@ -412,80 +480,206 @@ async def get_requests(
         has_next=page < total_pages,
     )
 
+@api_router.post("/requests/{request_id}/classify", response_model=Request)
+async def classify_request(
+    request_id: str,
+    payload: ClassifyPayload,
+    current_user: User = Depends(require_role(["admin"]))
+):
+    doc = await db.requests.find_one({"id": request_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Request not found")
+    update = {
+        "level": payload.level,
+        "priority": payload.priority,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    await db.requests.update_one({"id": request_id}, {"$set": update})
+    doc = await db.requests.find_one({"id": request_id})
+    return Request(**doc)
+
+@api_router.post("/requests/{request_id}/assign", response_model=Request)
+async def assign_request(
+    request_id: str,
+    payload: AssignPayload,
+    current_user: User = Depends(require_role(["admin"]))
+):
+    doc = await db.requests.find_one({"id": request_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    target_user_id = payload.assigned_to or current_user.id
+    target_user = await db.users.find_one({"id": target_user_id})
+    if not target_user:
+        raise HTTPException(status_code=400, detail="Usuario destino no encontrado")
+
+    update = {
+        "assigned_to": target_user["id"],
+        "assigned_to_name": target_user["full_name"],
+        "estimated_hours": payload.estimated_hours,
+        "estimated_due": payload.estimated_due,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    await db.requests.update_one({"id": request_id}, {"$set": update})
+    doc = await db.requests.find_one({"id": request_id})
+    return Request(**doc)
+
+@api_router.post("/requests/{request_id}/transition", response_model=Request)
+async def transition_request(
+    request_id: str,
+    payload: TransitionPayload,
+    current_user: User = Depends(require_role(["support", "admin"]))):
+    doc = await db.requests.find_one({"id": request_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    current = Request(**doc)
+    ensure_transition(current.status, payload.to_status)
+
+    set_ops: Dict[str, Any] = {
+        "status": payload.to_status,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    if payload.to_status in {"Finalizada", "Rechazada"}:
+        set_ops["completion_date"] = datetime.now(timezone.utc)
+
+    history_event = StateEvent(
+        from_status=current.status,
+        to_status=payload.to_status,
+        by_user_id=current_user.id,
+        by_user_name=current_user.full_name,
+    ).dict()
+
+    await db.requests.update_one(
+        {"id": request_id},
+        {"$set": set_ops, "$push": {"state_history": history_event}}
+    )
+
+    doc = await db.requests.find_one({"id": request_id})
+    return Request(**doc)
+
+@api_router.post("/requests/{request_id}/feedback", response_model=Request)
+async def submit_feedback(
+    request_id: str,
+    payload: FeedbackPayload,
+    current_user: User = Depends(require_role(["employee", "admin", "support"]))):
+    doc = await db.requests.find_one({"id": request_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Request not found")
+    req = Request(**doc)
+
+    if current_user.role != "admin" and req.requester_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Solo el solicitante puede enviar feedback")
+    if req.status != "Finalizada":
+        raise HTTPException(status_code=400, detail="La solicitud no está finalizada")
+    if req.feedback is not None:
+        raise HTTPException(status_code=400, detail="El feedback ya fue registrado")
+
+    fb = Feedback(
+        rating=payload.rating,
+        comment=payload.comment,
+        by_user_id=current_user.id,
+        by_user_name=current_user.full_name
+    ).dict()
+
+    await db.requests.update_one({"id": request_id}, {"$set": {"feedback": fb}})
+    doc = await db.requests.find_one({"id": request_id})
+    return Request(**doc)
+
+# ---- Update genérico con trazabilidad (compat) ----
 @api_router.put("/requests/{request_id}", response_model=Request)
-async def update_request(
+async def update_request_generic(
     request_id: str,
     request_update: RequestUpdate,
     current_user: User = Depends(require_role(["support", "admin"]))
 ):
-    request_doc = await db.requests.find_one({"id": request_id})
-    if not request_doc:
+    doc = await db.requests.find_one({"id": request_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="Request not found")
 
+    current = Request(**doc)
     update_data = request_update.dict(exclude_unset=True)
     update_data["updated_at"] = datetime.now(timezone.utc)
 
-    if "assigned_to" in update_data and update_data["assigned_to"] is not None:
+    ops: Dict[str, Any] = {"$set": update_data}
+    if "status" in update_data and update_data["status"] and update_data["status"] != current.status:
+        ensure_transition(current.status, update_data["status"])
+        if update_data["status"] in {"Finalizada", "Rechazada"}:
+            ops["$set"]["completion_date"] = datetime.now(timezone.utc)
+        ops["$push"] = {"state_history": StateEvent(
+            from_status=current.status,
+            to_status=update_data["status"],
+            by_user_id=current_user.id,
+            by_user_name=current_user.full_name
+        ).dict()}
+
+    if "assigned_to" in update_data and update_data["assigned_to"]:
         assigned_user = await db.users.find_one({"id": update_data["assigned_to"]})
         if assigned_user:
-            update_data["assigned_to_name"] = assigned_user["full_name"]
+            ops["$set"]["assigned_to_name"] = assigned_user["full_name"]
 
-    if update_data.get("status") in ["Completada", "Rechazada"]:
-        update_data["completion_date"] = datetime.now(timezone.utc)
+    await db.requests.update_one({"id": request_id}, ops)
+    doc = await db.requests.find_one({"id": request_id})
+    return Request(**doc)
 
-    await db.requests.update_one({"id": request_id}, {"$set": update_data})
-    updated_request = await db.requests.find_one({"id": request_id})
-    return Request(**updated_request)
-
-# ---- Analytics ----
-@api_router.get("/analytics/dashboard")
-async def get_dashboard_analytics(
-    period: str = "month",
-    current_user: User = Depends(require_role(["support", "admin"]))
-):
-    now = datetime.now(timezone.utc)
-    if period == "day":
-        start_date = now - timedelta(days=1)
-    elif period == "week":
-        start_date = now - timedelta(weeks=1)
+# ---- Reportes / Analytics helpers ----
+def _range_for_period(period: Literal["daily", "weekly", "monthly"], ref: Optional[datetime] = None):
+    now = ref or datetime.now(timezone.utc)
+    if period == "daily":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "weekly":
+        start = (now - timedelta(days=(now.isoweekday() - 1))).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        start_date = now - timedelta(days=30)
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start, now
 
-    requests = await db.requests.find({"created_at": {"$gte": start_date}}).to_list(1000)
+async def _summary_payload(period: Literal["daily", "weekly", "monthly"]):
+    start, end = _range_for_period(period)
 
-    total_requests = len(requests)
-    completed_requests = len([r for r in requests if r["status"] == "Completada"])
-    rejected_requests = len([r for r in requests if r["status"] == "Rechazada"])
-    in_progress_requests = len([r for r in requests if r["status"] == "En progreso"])
-    pending_requests = len([r for r in requests if r["status"] == "Pendiente"])
+    new_count = await db.requests.count_documents({"requested_at": {"$gte": start, "$lte": end}})
+    finished_q = {"status": "Finalizada", "completion_date": {"$gte": start, "$lte": end}}
+    finished_count = await db.requests.count_documents(finished_q)
+    pending_now = await db.requests.count_documents({"status": {"$in": ["Pendiente","En progreso","En revisión"]}})
 
-    dept_stats = {}
-    for r in requests:
-        dept = r["department"]
-        dept_stats[dept] = dept_stats.get(dept, 0) + 1
-
-    completed_with_dates = [
-        r for r in requests if r["status"] == "Completada" and r.get("completion_date")
+    pipeline = [
+        {"$match": finished_q},
+        {"$group": {"_id": "$assigned_to_name", "finalizados": {"$sum": 1}}},
+        {"$sort": {"finalizados": -1}}
     ]
-    avg_resolution_hours = 0
-    if completed_with_dates:
-        total_hours = sum(
-            (r["completion_date"] - r["created_at"]).total_seconds() / 3600
-            for r in completed_with_dates
-        )
-        avg_resolution_hours = round(total_hours / len(completed_with_dates), 1)
+    prod = await db.requests.aggregate(pipeline).to_list(length=1000)
+
+    finals = await db.requests.find(finished_q).to_list(2000)
+    avg_hours = 0.0
+    if finals:
+        total_hours = sum([(r["completion_date"] - r["created_at"]).total_seconds() / 3600 for r in finals])
+        avg_hours = round(total_hours / len(finals), 1)
 
     return {
         "period": period,
-        "total_requests": total_requests,
-        "completed_requests": completed_requests,
-        "rejected_requests": rejected_requests,
-        "in_progress_requests": in_progress_requests,
-        "pending_requests": pending_requests,
-        "requests_by_department": dept_stats,
-        "avg_resolution_hours": avg_resolution_hours,
-        "completion_rate": round((completed_requests / total_requests * 100) if total_requests > 0 else 0, 1),
+        "from": start,
+        "to": end,
+        "new": new_count,
+        "finished": finished_count,
+        "pending_now": pending_now,
+        "avg_cycle_hours": avg_hours,
+        "productivity_by_tech": prod,
     }
+
+# ---- Reportes ----
+@api_router.get("/reports/summary")
+async def reports_summary(
+    period: Literal["daily", "weekly", "monthly"] = Query("daily"),
+    current_user: User = Depends(require_role(["support", "admin"]))
+):
+    return await _summary_payload(period)
+
+@api_router.get("/analytics/dashboard")
+async def analytics_dashboard(
+    period: Literal["day", "week", "month"] = Query("month"),
+    current_user: User = Depends(require_role(["support", "admin"]))
+):
+    map_period = {"day":"daily","week":"weekly","month":"monthly"}[period]
+    return await _summary_payload(map_period)
 
 # ============================
 #        App lifecycle
@@ -493,25 +687,25 @@ async def get_dashboard_analytics(
 @app.on_event("startup")
 async def startup_event():
     await ensure_security_indexes()
-    await ensure_core_indexes()  # <- índices de rendimiento/búsqueda
+    await ensure_core_indexes()
     await init_data()
 
-# Routers
 app.include_router(api_router)
 
-# ---- CORS ----
-_raw_origins = os.environ.get("CORS_ORIGINS", "")
-if _raw_origins.strip():
-    allow_origins_list = [o.strip() for o in _raw_origins.split(",") if o.strip()]
-else:
-    allow_origins_list = ["http://localhost:3000", "http://localhost:5173"]
-
+# ---- CORS (robusto para dev) ----
+allow_origins_list = list(filter(None, [
+    *(o.strip() for o in os.environ.get("CORS_ORIGINS","").split(",") if o.strip()),
+    "http://localhost:3000", "http://127.0.0.1:3000",
+    "http://localhost:5173", "http://127.0.0.1:5173",
+]))
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=allow_origins_list,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allow_origins_list or ["http://localhost:3000"],
+    allow_methods=["GET","POST","PUT","DELETE","OPTIONS"],
+    allow_headers=["Authorization","Content-Type"],
+    expose_headers=["*"],
+    max_age=600,
 )
 
 # ---- Logging ----
