@@ -398,7 +398,7 @@ function App() {
                 />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+                {loading ? 'Iniciando sesión...' : 'Iniciar sesión'}
               </Button>
             </form>
             <div className="mt-6 p-4 bg-gray-50 rounded-lg">
