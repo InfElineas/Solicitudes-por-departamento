@@ -55,6 +55,7 @@ function AnalyticsView({ analytics, analyticsPeriod, setAnalyticsPeriod }) {
                         <th className="py-2 pr-2 text-right">Asignadas</th>
                         <th className="py-2 pr-2 text-right">Atendidas (periodo)</th>
                         <th className="py-2 pr-2 text-right">Pendientes</th>
+                        <th className="py-2 pr-2 text-right">En revision</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -64,6 +65,7 @@ function AnalyticsView({ analytics, analyticsPeriod, setAnalyticsPeriod }) {
                           <td className="py-2 pr-2 text-right">{row.assigned_total ?? 0}</td>
                           <td className="py-2 pr-2 text-right">{row.attended_period ?? 0}</td>
                           <td className="py-2 pr-2 text-right">{row.pending_now ?? 0}</td>
+                          <td className="py-2 pr-2 text-right">{row.in_revision ?? 0}</td>
                         </tr>
                       ))}
                     </tbody>
