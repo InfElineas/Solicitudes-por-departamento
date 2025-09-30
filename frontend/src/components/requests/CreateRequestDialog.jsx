@@ -135,15 +135,16 @@ const CreateRequestDialog = ({
 
               <div className="space-y-2">
                 <Label>Nivel</Label>
+                <DialogDescription>Define el nivel (1-3) y la prioridad</DialogDescription>
                 <Select
                   value={newRequest.level}
                   onValueChange={(v) => setNewRequest({ ...newRequest, level: v })}
                 >
                   <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="1">1</SelectItem>
-                    <SelectItem value="2">2</SelectItem>
-                    <SelectItem value="3">3</SelectItem>
+                    <SelectItem value="1">1 (simple/capacitación)</SelectItem>
+                    <SelectItem value="2">2 (soporte/correcciones)</SelectItem>
+                    <SelectItem value="3">3 (desarrollo/automatización)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
