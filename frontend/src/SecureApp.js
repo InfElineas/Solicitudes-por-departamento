@@ -6,7 +6,7 @@ import AnalyticsView from "./components/analytics/AnalyticsView";
 import DepartmentsView from "./components/departaments/DepartmentsView"; // respeta el nombre del folder actual
 import UsersView from "./components/users/UsersView";
 import TrashView from "./components/requests/TrashView";
-import RequestsView from "./RequestsView";
+import RequestsView from "./components/requests/RequestsView";
  // si te pasé RequestsView embebido, muévelo a /src/RequestsView.jsx
 
 import { useAuth } from "./App";

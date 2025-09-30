@@ -4,6 +4,8 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { toast } from 'sonner';
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
+
 
 export default function TrashView({ api }) {
   const [items, setItems] = useState([]);
@@ -11,6 +13,19 @@ export default function TrashView({ api }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [meta, setMeta] = useState({ total: 0, total_pages: 1 });
+
+  const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
+
+  const purgeAll = async () => {
+  try {
+    await api.delete('/requests/trash');
+    toast.success('Papelera vaciada correctamente');
+    load();
+    setConfirmPurgeAll(false);
+  } catch (e) {
+    toast.error(e?.response?.data?.detail || 'No se pudo vaciar la papelera');
+  }
+};
 
   const load = async () => {
     try {
@@ -38,7 +53,6 @@ export default function TrashView({ api }) {
   };
 
   const purge = async (id) => {
-    if (!window.confirm('¿Eliminar definitivamente?')) return;
     try {
       await api.delete(`/requests/trash/${id}`);
       toast.success('Solicitud eliminada definitivamente');
@@ -67,6 +81,25 @@ export default function TrashView({ api }) {
           />
         </div>
       </div>
+
+      <Dialog open={confirmPurgeAll} onOpenChange={setConfirmPurgeAll}>
+  <DialogTrigger asChild>
+    <Button variant="destructive" className="ml-auto">
+      Vaciar Papelera
+    </Button>
+  </DialogTrigger>
+  <DialogContent>
+    <DialogHeader>
+      <DialogTitle>¿Vaciar la papelera?</DialogTitle>
+      <DialogDescription>Esto eliminará <strong>permanentemente</strong> todas las solicitudes en la papelera.</DialogDescription>
+    </DialogHeader>
+    <div className="flex justify-end gap-2">
+      <Button variant="outline" onClick={() => setConfirmPurgeAll(false)}>Cancelar</Button>
+      <Button variant="destructive" onClick={purgeAll}>Eliminar todo</Button>
+    </div>
+  </DialogContent>
+</Dialog>
+
 
       <div className="grid gap-3">
         {items.map((it) => (
