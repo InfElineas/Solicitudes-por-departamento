@@ -1,16 +1,16 @@
-import React from 'react';
+import React from "react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription
-} from '@/components/ui/dialog';
+  DialogDescription,
+} from "@/components/ui/dialog";
 
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Props:
@@ -57,21 +57,23 @@ const EditRequestDialog = ({
           <select
             id={id}
             name={name}
-            value={value ?? ''}
+            value={value ?? ""}
             onChange={onChange}
             disabled={saving}
             className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
           >
             <option value="">— Seleccionar —</option>
             {options.map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
             ))}
           </select>
         ) : (
           <Input
             id={id}
             name={name}
-            value={value ?? ''}
+            value={value ?? ""}
             onChange={onChange}
             disabled={saving}
           />
@@ -97,7 +99,7 @@ const EditRequestDialog = ({
             <Input
               id="title"
               name="title"
-              value={editData.title ?? ''}
+              value={editData.title ?? ""}
               onChange={handleChange}
               required
               disabled={saving}
@@ -110,7 +112,7 @@ const EditRequestDialog = ({
             <Textarea
               id="description"
               name="description"
-              value={editData.description ?? ''}
+              value={editData.description ?? ""}
               onChange={handleChange}
               rows={4}
               disabled={saving}
@@ -158,7 +160,7 @@ const EditRequestDialog = ({
               Cancelar
             </Button>
             <Button type="submit" disabled={saving}>
-              {saving ? 'Guardando…' : 'Guardar Cambios'}
+              {saving ? "Guardando…" : "Guardar Cambios"}
             </Button>
           </div>
         </form>

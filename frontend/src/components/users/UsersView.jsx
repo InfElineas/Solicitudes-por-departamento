@@ -1,17 +1,17 @@
 // src/components/users/UsersView.jsx
 
-import React from 'react';
-import { Card, CardContent } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { User } from 'lucide-react';
+import React from "react";
+import { Card, CardContent } from "../ui/card";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { User } from "lucide-react";
 
 // Componente para generar un avatar
 const Avatar = ({ name }) => {
   const initials = name
-    .split(' ')
-    .map(n => n[0])
-    .join('')
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
     .toUpperCase();
 
   const color = stringToColor(name);
@@ -48,21 +48,29 @@ function UsersView({ users, onDeleteUser }) {
                 <Avatar className="w-20 h-20" name={u.full_name} />
                 <div>
                   <h3 className="font-semibold">{u.full_name}</h3>
-                  <p variant={
-                    u.role === 'admin' ? 'default' :
-                    u.role === 'support' ? 'secondary' : 'outline'
-                    }>
-                    {u.role === 'admin' ? 'Administrador' :
-                    u.role === 'support' ? 'Soporte' : 'Empleado'}
+                  <p
+                    variant={
+                      u.role === "admin"
+                        ? "default"
+                        : u.role === "support"
+                          ? "secondary"
+                          : "outline"
+                    }
+                  >
+                    {u.role === "admin"
+                      ? "Administrador"
+                      : u.role === "support"
+                        ? "Soporte"
+                        : "Empleado"}
                   </p>
                   <p className="text-sm text-gray-500">@{u.username}</p>
-                  <p className="text-sm text-gray-500">{u.department} • {u.position}</p>
+                  <p className="text-sm text-gray-500">
+                    {u.department} • {u.position}
+                  </p>
                 </div>
               </div>
 
               <div className="flex flex-col items-end space-y-2">
-
-
                 <Button
                   variant="destructive"
                   size="sm"

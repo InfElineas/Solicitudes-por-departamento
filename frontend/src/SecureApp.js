@@ -7,7 +7,7 @@ import DepartmentsView from "./components/departaments/DepartmentsView"; // resp
 import UsersView from "./components/users/UsersView";
 import TrashView from "./components/requests/TrashView";
 import RequestsView from "./components/requests/RequestsView";
- // si te pasé RequestsView embebido, muévelo a /src/RequestsView.jsx
+// si te pasé RequestsView embebido, muévelo a /src/RequestsView.jsx
 
 import { useAuth } from "./App";
 
@@ -28,7 +28,9 @@ function AppLayout() {
         <header className="bg-white shadow-sm border-b">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="text-lg font-semibold">Sistema de Solicitudes</div>
-            <button className="text-sm text-gray-600" onClick={logout}>Salir</button>
+            <button className="text-sm text-gray-600" onClick={logout}>
+              Salir
+            </button>
           </div>
         </header>
       )}
@@ -44,7 +46,7 @@ export default function SecureApp() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<RequestsView />} />
-        <Route element={<RequireRole roles={["support","admin"]} />}>
+        <Route element={<RequireRole roles={["support", "admin"]} />}>
           <Route path="analytics" element={<AnalyticsView />} />
         </Route>
         <Route element={<RequireRole roles={["admin"]} />}>

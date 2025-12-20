@@ -1,38 +1,38 @@
 // src/components/requests/CreateRequestDialog.jsx
 
-import React from 'react';
+import React from "react";
 import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 const CreateRequestDialog = ({
   user,
   users,
   newRequest,
   setNewRequest,
-  createRequest
+  createRequest,
 }) => {
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === "admin";
 
   // ✅ Técnicos filtrados: soporte o admin y del depto Informática
   const availableTechnicians = users.filter(
     (u) =>
-      (u.role === 'support' || u.role === 'admin') &&
-      u.department === 'Informática'
+      (u.role === "support" || u.role === "admin") &&
+      u.department === "Informática",
   );
 
   return (
@@ -82,7 +82,9 @@ const CreateRequestDialog = ({
                 setNewRequest({ ...newRequest, priority: value })
               }
             >
-              <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Alta">Alta</SelectItem>
                 <SelectItem value="Media">Media</SelectItem>
@@ -99,7 +101,9 @@ const CreateRequestDialog = ({
                 setNewRequest({ ...newRequest, type: value })
               }
             >
-              <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Soporte">Soporte</SelectItem>
                 <SelectItem value="Mejora">Mejora</SelectItem>
@@ -117,7 +121,9 @@ const CreateRequestDialog = ({
                 setNewRequest({ ...newRequest, channel: value })
               }
             >
-              <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Sistema">Sistema</SelectItem>
                 <SelectItem value="Correo">Correo</SelectItem>
@@ -132,19 +138,26 @@ const CreateRequestDialog = ({
           <>
             <div className="border-t pt-4" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
               <div className="space-y-2">
                 <Label>Nivel</Label>
-                <DialogDescription>Define el nivel (1-3) y la prioridad</DialogDescription>
+                <DialogDescription>
+                  Define el nivel (1-3) y la prioridad
+                </DialogDescription>
                 <Select
                   value={newRequest.level}
-                  onValueChange={(v) => setNewRequest({ ...newRequest, level: v })}
+                  onValueChange={(v) =>
+                    setNewRequest({ ...newRequest, level: v })
+                  }
                 >
-                  <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar" />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="1">1 (simple/capacitación)</SelectItem>
                     <SelectItem value="2">2 (soporte/correcciones)</SelectItem>
-                    <SelectItem value="3">3 (desarrollo/automatización)</SelectItem>
+                    <SelectItem value="3">
+                      3 (desarrollo/automatización)
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -157,10 +170,12 @@ const CreateRequestDialog = ({
                     setNewRequest({ ...newRequest, assigned_to: v })
                   }
                 >
-                  <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar..." />
+                  </SelectTrigger>
                   <SelectContent>
                     {availableTechnicians.length > 0 ? (
-                      availableTechnicians.map(u => (
+                      availableTechnicians.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.full_name}
                         </SelectItem>
@@ -182,7 +197,10 @@ const CreateRequestDialog = ({
                   step="0.5"
                   value={newRequest.estimated_hours}
                   onChange={(e) =>
-                    setNewRequest({ ...newRequest, estimated_hours: e.target.value })
+                    setNewRequest({
+                      ...newRequest,
+                      estimated_hours: e.target.value,
+                    })
                   }
                   placeholder="Ej: 4"
                 />
@@ -194,7 +212,10 @@ const CreateRequestDialog = ({
                   type="datetime-local"
                   value={newRequest.estimated_due}
                   onChange={(e) =>
-                    setNewRequest({ ...newRequest, estimated_due: e.target.value })
+                    setNewRequest({
+                      ...newRequest,
+                      estimated_due: e.target.value,
+                    })
                   }
                 />
               </div>

@@ -1,22 +1,22 @@
-import React from 'react';
+import React from "react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 const ClassifyDialog = ({
   classifyDialogFor,
   setClassifyDialogFor,
   classifyData,
   setClassifyData,
-  classifyRequest
+  classifyRequest,
 }) => {
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setClassifyData(prev => ({ ...prev, [name]: value }));
+    setClassifyData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = () => {
@@ -25,7 +25,10 @@ const ClassifyDialog = ({
   };
 
   return (
-    <Dialog open={!!classifyDialogFor} onOpenChange={() => setClassifyDialogFor(null)}>
+    <Dialog
+      open={!!classifyDialogFor}
+      onOpenChange={() => setClassifyDialogFor(null)}
+    >
       <DialogContent className="max-w-md w-full">
         <DialogHeader>
           <DialogTitle>Clasificar Solicitud</DialogTitle>
@@ -37,7 +40,7 @@ const ClassifyDialog = ({
             <label className="block mb-1 text-sm font-medium">Nivel</label>
             <select
               name="level"
-              value={classifyData.level || ''}
+              value={classifyData.level || ""}
               onChange={handleChange}
               className="w-full border rounded px-3 py-2 text-sm"
             >
@@ -53,7 +56,7 @@ const ClassifyDialog = ({
             <label className="block mb-1 text-sm font-medium">Prioridad</label>
             <select
               name="priority"
-              value={classifyData.priority || ''}
+              value={classifyData.priority || ""}
               onChange={handleChange}
               className="w-full border rounded px-3 py-2 text-sm"
             >
@@ -70,7 +73,7 @@ const ClassifyDialog = ({
             <label className="block mb-1 text-sm font-medium">Comentario</label>
             <textarea
               name="comment"
-              value={classifyData.comment || ''}
+              value={classifyData.comment || ""}
               onChange={handleChange}
               className="w-full border rounded px-3 py-2 text-sm"
               rows="3"
@@ -80,9 +83,7 @@ const ClassifyDialog = ({
 
           {/* Botón */}
           <div className="pt-2 flex justify-end">
-            <Button onClick={handleSubmit}>
-              Clasificar
-            </Button>
+            <Button onClick={handleSubmit}>Clasificar</Button>
           </div>
         </div>
       </DialogContent>

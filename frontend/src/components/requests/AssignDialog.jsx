@@ -1,17 +1,23 @@
 // src/components/requests/AssignDialog.jsx
-import React from 'react';
+import React from "react";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '../ui/dialog';
+} from "../ui/dialog";
 
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 
 const AssignDialog = ({
   open,
@@ -24,8 +30,8 @@ const AssignDialog = ({
   // ✅ Filtrar usuarios de soporte y del departamento "Informática"
   const supportUsers = users.filter(
     (u) =>
-      (u.role === 'support' || u.role === 'admin') &&
-      u.department === 'Informática'
+      (u.role === "support" || u.role === "admin") &&
+      u.department === "Informática",
   );
 
   return (
@@ -43,7 +49,9 @@ const AssignDialog = ({
             <Label>Técnico</Label>
             <Select
               value={assignData.assigned_to}
-              onValueChange={(v) => setAssignData({ ...assignData, assigned_to: v })}
+              onValueChange={(v) =>
+                setAssignData({ ...assignData, assigned_to: v })
+              }
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar..." />
@@ -56,7 +64,9 @@ const AssignDialog = ({
                     </SelectItem>
                   ))
                 ) : (
-                  <div className="px-4 py-2 text-sm text-gray-500">Sin técnicos disponibles</div>
+                  <div className="px-4 py-2 text-sm text-gray-500">
+                    Sin técnicos disponibles
+                  </div>
                 )}
               </SelectContent>
             </Select>
@@ -71,7 +81,10 @@ const AssignDialog = ({
               placeholder="Ej: 4"
               value={assignData.estimated_hours}
               onChange={(e) =>
-                setAssignData({ ...assignData, estimated_hours: e.target.value })
+                setAssignData({
+                  ...assignData,
+                  estimated_hours: e.target.value,
+                })
               }
             />
           </div>
@@ -92,10 +105,7 @@ const AssignDialog = ({
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
-          <Button
-            onClick={onSubmit}
-            disabled={!assignData.assigned_to}
-          >
+          <Button onClick={onSubmit} disabled={!assignData.assigned_to}>
             Asignar
           </Button>
         </div>

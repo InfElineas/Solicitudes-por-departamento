@@ -1,7 +1,13 @@
-import React from 'react';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import React from "react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
   const handleChange = (field, value) => {
@@ -17,15 +23,20 @@ const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
         <Input
           placeholder="Título o descripción..."
           value={filters.q}
-          onChange={(e) => handleChange('q', e.target.value)}
+          onChange={(e) => handleChange("q", e.target.value)}
         />
       </div>
 
       {/* Estado */}
       <div>
         <Label className="text-sm">Estado</Label>
-        <Select value={filters.status} onValueChange={(value) => handleChange('status', value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={filters.status}
+          onValueChange={(value) => handleChange("status", value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
             <SelectItem value="Pendiente">Pendiente</SelectItem>
@@ -40,12 +51,19 @@ const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
       {/* Departamento */}
       <div>
         <Label className="text-sm">Departamento</Label>
-        <Select value={filters.department} onValueChange={(value) => handleChange('department', value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={filters.department}
+          onValueChange={(value) => handleChange("department", value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
             {departments.map((d) => (
-              <SelectItem key={d} value={d}>{d}</SelectItem>
+              <SelectItem key={d} value={d}>
+                {d}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -54,8 +72,13 @@ const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
       {/* Tipo */}
       <div>
         <Label className="text-sm">Tipo</Label>
-        <Select value={filters.type} onValueChange={(value) => handleChange('type', value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={filters.type}
+          onValueChange={(value) => handleChange("type", value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
             <SelectItem value="Soporte">Soporte</SelectItem>
@@ -69,8 +92,13 @@ const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
       {/* Nivel */}
       <div>
         <Label className="text-sm">Nivel</Label>
-        <Select value={filters.level} onValueChange={(value) => handleChange('level', value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={filters.level}
+          onValueChange={(value) => handleChange("level", value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
             <SelectItem value="1">1</SelectItem>
@@ -83,8 +111,13 @@ const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
       {/* Canal */}
       <div>
         <Label className="text-sm">Canal</Label>
-        <Select value={filters.channel} onValueChange={(value) => handleChange('channel', value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={filters.channel}
+          onValueChange={(value) => handleChange("channel", value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
             <SelectItem value="Sistema">Sistema</SelectItem>
@@ -97,13 +130,22 @@ const RequestFilters = ({ filters, setFilters, departments, setPage }) => {
       {/* Orden */}
       <div className="md:col-span-2">
         <Label className="text-sm">Orden</Label>
-        <Select value={filters.sort} onValueChange={(value) => handleChange('sort', value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
+        <Select
+          value={filters.sort}
+          onValueChange={(value) => handleChange("sort", value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="-created_at">Creación: más recientes</SelectItem>
             <SelectItem value="created_at">Creación: más antiguas</SelectItem>
-            <SelectItem value="-requested_at">Solicitada: más recientes</SelectItem>
-            <SelectItem value="requested_at">Solicitada: más antiguas</SelectItem>
+            <SelectItem value="-requested_at">
+              Solicitada: más recientes
+            </SelectItem>
+            <SelectItem value="requested_at">
+              Solicitada: más antiguas
+            </SelectItem>
             <SelectItem value="status">Estado (A→Z)</SelectItem>
             <SelectItem value="-status">Estado (Z→A)</SelectItem>
             <SelectItem value="department">Depto (A→Z)</SelectItem>
