@@ -123,16 +123,19 @@ function AnalyticsView({ analytics, analyticsPeriod, setAnalyticsPeriod }) {
                             {row.name || "Sin asignación"}
                           </td>
                           <td className="py-2 pr-2 text-right">
-                            {row.assigned_total ?? 0}
+                            {row.assigned_total ?? "-"}
                           </td>
                           <td className="py-2 pr-2 text-right">
-                            {row.attended_period ?? 0}
+                            {row.attended_period ?? "-"}
                           </td>
                           <td className="py-2 pr-2 text-right">
-                            {row.pending_now ?? 0}
+                            {row.pending_now ?? "-"}
                           </td>
                           <td className="py-2 pr-2 text-right">
-                            {row.in_revision ?? 0}
+                            {row.in_revision ??
+                              row.assigned_total -
+                                (row.attended_period + row.pending_now) ??
+                              "-"}
                           </td>
                         </tr>
                       ))}
