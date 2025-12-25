@@ -57,6 +57,12 @@ const fmtDate = (d) => {
   }
 };
 
+const truncateText = (value, max = 20) => {
+  if (!value) return "";
+  const str = String(value);
+  return str.length > max ? `${str.slice(0, max)}…` : str;
+};
+
 const RequestCard = ({
   request,
   user,
@@ -111,57 +117,57 @@ const RequestCard = ({
     requester_id,
   } = request || {};
 
+  const truncatedTitle = truncateText(title);
+  const truncatedDescription = truncateText(description);
+
   return (
-    <Card>
+    <Card className="shadow-sm border border-gray-100">
       <CardHeader>
-        <div className="flex justify-between flex-wrap gap-2">
-          <div>
-            <CardTitle className="text-lg">{title}</CardTitle>
-            <CardDescription className="flex flex-wrap items-center gap-2 mt-2 text-sm text-gray-600">
-              <span>{requester_name || "-"}</span>
-              <span>•</span>
-              <span>{department || "-"}</span>
-              <span>•</span>
-              <span title={created_at || ""}>{fmtDate(created_at)}</span>
-              {level && (
-                <>
-                  <span>•</span>
-                  <span className="font-medium">Nivel de dificultad:</span>{" "}
-                  {level}
-                </>
-              )}
-              <span>•</span>
-              <span className="font-medium">Tipo:</span> {type || "-"}
-              <span>•</span>
-              <span className="font-medium">Canal:</span> {channel || "-"}
-              {assigned_by_name && (
-                <>
-                  <span>•</span>
-                  <span className="font-medium">Asignado por:</span>{" "}
-                  {assigned_by_name}
-                </>
-              )}
-              {review_evidence?.url && (
-                <>
-                  <span>•</span>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2 min-w-0">
+            <CardTitle
+              className="text-lg leading-snug break-words"
+              title={title}
+            >
+              {truncatedTitle}
+            </CardTitle>
+            <CardDescription className="space-y-1">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-700">
+                <span className="font-medium text-gray-900">
+                  {requester_name || "-"}
+                </span>
+                <span className="text-gray-400">•</span>
+                <span>{department || "-"}</span>
+                <span className="text-gray-400">•</span>
+                <span title={created_at || ""}>{fmtDate(created_at)}</span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
+                {level && <span className="font-medium">Nivel: {level}</span>}
+                <span className="font-medium">Tipo:</span>{" "}
+                <span>{type || "-"}</span>
+                <span className="font-medium">Canal:</span>{" "}
+                <span>{channel || "-"}</span>
+                {assigned_by_name && (
+                  <span className="font-medium">
+                    Asignado por: {assigned_by_name}
+                  </span>
+                )}
+                {review_evidence?.url && (
                   <a
                     href={review_evidence.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="underline inline-flex items-center gap-1"
+                    className="underline inline-flex items-center gap-1 text-blue-700"
                   >
                     <LinkIcon className="h-3 w-3" /> Evidencia
                   </a>
-                </>
-              )}
-              {status === "Rechazada" && rejection_reason && (
-                <>
-                  <span>•</span>
+                )}
+                {status === "Rechazada" && rejection_reason && (
                   <span className="inline-flex items-center gap-1 text-red-600">
                     <AlertTriangle className="h-3 w-3" /> {rejection_reason}
                   </span>
-                </>
-              )}
+                )}
+              </div>
             </CardDescription>
           </div>
 
@@ -174,32 +180,36 @@ const RequestCard = ({
         </div>
       </CardHeader>
 
-      <CardContent>
-        {description && <p className="text-gray-600 mb-4">{description}</p>}
+      <CardContent className="space-y-4">
+        {description && (
+          <p className="text-gray-700 leading-relaxed" title={description}>
+            {truncatedDescription}
+          </p>
+        )}
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="text-sm text-gray-500 space-y-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-gray-600">
+          <div className="space-y-1">
             {assigned_to_name && (
-              <div>
-                <span className="font-medium">Asignado a:</span>{" "}
-                {assigned_to_name}
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">Asignado a:</span>
+                <span>{assigned_to_name}</span>
               </div>
             )}
             {estimated_hours && (
-              <div>
-                <span className="font-medium">Estimado:</span> {estimated_hours}{" "}
-                h
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">Estimado:</span>
+                <span>{estimated_hours} h</span>
               </div>
             )}
             {estimated_due && (
-              <div>
-                <span className="font-medium">Compromiso:</span>{" "}
-                {fmtDate(estimated_due)}
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">Compromiso:</span>
+                <span>{fmtDate(estimated_due)}</span>
               </div>
             )}
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
             {/* Admin: Clasificar / Asignar */}
             {user?.role === "admin" && status !== "En progreso" && (
               <>

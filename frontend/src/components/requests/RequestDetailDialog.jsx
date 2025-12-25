@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   Dialog,
@@ -9,29 +9,43 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { notifyAuthExpired } from "@/utils/session";
+import { deriveHistory as buildHistoryTimeline } from "./historyUtils";
 
-/* -------------------- BASE URL (Vite/CRA/global/fallback) -------------------- */
-const VITE =
-  (typeof import.meta !== "undefined" &&
-    import.meta.env &&
-    import.meta.env.VITE_API_URL) ||
-  undefined;
-const CRA =
-  (typeof process !== "undefined" &&
+/* -------------------- BASE URL robusto (Vite/CRA + proxy Netlify) -------------------- */
+const isLocal =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
+const ENV_URL = (() => {
+  if (
+    typeof process !== "undefined" &&
     process.env &&
-    process.env.REACT_APP_BACKEND_URL) ||
-  undefined;
-const GLOBAL = (typeof window !== "undefined" && window.__API_URL) || undefined;
-const GUESS = `${window?.location?.protocol || "http:"}//${window?.location?.hostname || "localhost"}:8000`;
-const BASE = (VITE || CRA || GLOBAL || GUESS).replace(/\/+$/, "");
+    process.env.REACT_APP_BACKEND_URL
+  ) {
+    return process.env.REACT_APP_BACKEND_URL;
+  }
 
-/* -------------------- Axios con credenciales y token -------------------- */
+  if (typeof window !== "undefined") {
+    const globals = window.__API_URL || window.API_URL || window.BACKEND_URL;
+    if (globals) return globals;
+  }
+
+  return isLocal ? "http://localhost:8000" : "";
+})();
+
+// En local usamos URL explícita; en prod usamos el proxy /api (definido en netlify.toml)
+const baseURL = isLocal ? `${ENV_URL.replace(/\/+$/, "")}/api` : "/api";
+
+/* -------------------- Axios con token (Bearer) -------------------- */
 const api = axios.create({
-  baseURL: `${BASE}/api`,
-  withCredentials: true, // si tu backend usa cookies HttpOnly
+  baseURL,
+  withCredentials: false, // usamos Authorization, no cookies
+  timeout: 30000,
 });
 
-// Inyecta Authorization: Bearer <token> si existe (ajusta las keys si usas otro nombre)
 api.interceptors.request.use((config) => {
   const stored =
     localStorage.getItem("access_token") ||
@@ -73,6 +87,44 @@ const fmt = (d) => {
   }
 };
 
+export const deriveHistory = (data) => {
+  const baseHistory = Array.isArray(data?.history) ? data.history : [];
+  const knownTimestampKeys = [
+    { key: "created_at", label: "Creado" },
+    { key: "requested_at", label: "Solicitado" },
+    { key: "assigned_at", label: "Asignado" },
+    { key: "in_progress_at", label: "En progreso" },
+    { key: "in_review_at", label: "En revisión" },
+    { key: "finished_at", label: "Finalizada" },
+    { key: "rejected_at", label: "Rechazada" },
+    { key: "closed_at", label: "Cerrada" },
+    { key: "updated_at", label: "Actualizado" },
+  ];
+
+  const timeline = [...baseHistory];
+
+  // Soportamos estructuras tipo { status: fecha }
+  const statusMap =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? data.status_history || data.status_timestamps || data.status_dates
+      : null;
+
+  if (statusMap && typeof statusMap === "object") {
+    Object.entries(statusMap).forEach(([status, at]) => {
+      if (at) timeline.push({ at, from: null, to: status });
+    });
+  }
+
+  knownTimestampKeys.forEach(({ key, label }) => {
+    const value = data?.[key];
+    if (value) timeline.push({ at: value, from: null, to: label });
+  });
+
+  return timeline
+    .filter((entry) => entry && (entry.at || entry.to))
+    .sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+};
+
 function Field({ label, value }) {
   return (
     <div>
@@ -84,7 +136,7 @@ function Field({ label, value }) {
 
 function Table({ headers, rows }) {
   return (
-    <div className="max-h-64 overflow-auto rounded-lg border">
+    <div className="max-h-64 overflow-auto rounded-lg border overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="bg-gray-50">
           <tr>
@@ -129,11 +181,12 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const abortRef = useRef(null);
+  const historyRows = useMemo(() => buildHistoryTimeline(data), [data]);
 
   useEffect(() => {
     if (!open || !requestId) return;
 
-    // cancela request previo si existe
+    // Cancela request previo si existe
     abortRef.current?.abort?.();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -147,8 +200,10 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
       .catch((e) => {
         if (axios.isCancel(e)) return;
         const status = e?.response?.status;
-        if (status === 401) setErr("No autenticado. Inicia sesión nuevamente.");
-        else if (status === 403)
+        if (status === 401) {
+          notifyAuthExpired();
+          setErr("No autenticado. Inicia sesión nuevamente.");
+        } else if (status === 403)
           setErr("No autorizado para ver esta solicitud.");
         else if (status === 404) setErr("Solicitud no encontrada.");
         else setErr(e?.response?.data?.detail || e.message);
@@ -160,7 +215,7 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="w-[95vw] sm:w-auto max-w-3xl sm:max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Detalle de la solicitud</DialogTitle>
         </DialogHeader>
@@ -171,8 +226,8 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
         {data && !loading && !err && (
           <div className="space-y-4">
             {/* Header */}
-            <div className="flex items-start justify-between gap-3">
-              <div>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div className="space-y-1">
                 <div className="text-lg font-semibold">{data.title}</div>
                 <div className="text-sm text-gray-600">
                   {data.requester_name || data.requested_by?.name || "-"}
@@ -182,7 +237,7 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
                   {fmt(data.created_at)}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap justify-end">
                 <Badge className={colorPri(data.priority)}>
                   {data.priority || "-"}
                 </Badge>
@@ -193,14 +248,14 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
             </div>
 
             <Tabs value={tab} onValueChange={setTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3 gap-2">
                 <TabsTrigger value="overview">Resumen</TabsTrigger>
                 <TabsTrigger value="history">Historial</TabsTrigger>
                 <TabsTrigger value="worklogs">Worklogs</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="space-y-3">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                   <Field label="Tipo" value={data.type} />
                   <Field label="Canal" value={data.channel} />
                   <Field label="Nivel" value={data.level ?? "-"} />
@@ -242,15 +297,63 @@ export default function RequestDetailDialog({ open, onOpenChange, requestId }) {
               </TabsContent>
 
               <TabsContent value="history">
-                <Table
-                  headers={["Fecha", "De → A", "Por", "Nota"]}
-                  rows={(data.history || []).map((h) => [
-                    fmt(h.at),
-                    h.from ? `${h.from} → ${h.to}` : h.to || "-",
-                    h.by || "-",
-                    h.note || "-",
-                  ])}
-                />
+                <div className="rounded-lg border bg-white">
+                  <div className="px-4 py-3 border-b flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">
+                        Historial de estados
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Ordenado del más antiguo al más reciente.
+                      </p>
+                    </div>
+                  </div>
+                  <ScrollArea className="max-h-72">
+                    {historyRows.length === 0 ? (
+                      <div className="px-4 py-6 text-sm text-gray-500">
+                        Sin movimientos registrados.
+                      </div>
+                    ) : (
+                      <ul className="divide-y">
+                        {historyRows.map((h, idx) => (
+                          <li
+                            key={`${h.at || idx}-${h.to || idx}`}
+                            className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                                <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-gray-100 text-xs font-bold text-gray-600">
+                                  {idx + 1}
+                                </span>
+                                <span>
+                                  {h.from ? `${h.from} → ${h.to}` : h.to || "-"}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1 space-x-2">
+                                <span>{fmt(h.at)}</span>
+                                {h.durationLabel && (
+                                  <span className="text-gray-400">
+                                    • Estancia: {h.durationLabel}
+                                  </span>
+                                )}
+                                {h.by && (
+                                  <span className="text-gray-400">
+                                    • Por: {h.by}
+                                  </span>
+                                )}
+                              </div>
+                              {h.note && (
+                                <div className="text-xs text-gray-600 mt-1">
+                                  {h.note}
+                                </div>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </ScrollArea>
+                </div>
               </TabsContent>
 
               <TabsContent value="worklogs">

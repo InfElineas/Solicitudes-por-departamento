@@ -11,15 +11,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-/**
- * Props:
- * - open, onOpenChange, requestId, editData, setEditData, updateRequest
- * - saving?: boolean        (opcional; deshabilita UI mientras guarda)
- * - typeOptions?: string[]  (opcional; si vienen, usa <select>)
- * - channelOptions?: string[] (opcional)
- * - departmentOptions?: string[] (opcional)
- */
+const CHANNEL_OPTIONS = [
+  "Sistema",
+  "Google Sheets",
+  "Correo Electrónico",
+  "WhatsApp",
+];
+const TYPE_OPTIONS = ["Soporte", "Mejora", "Desarrollo", "Capacitación"];
+
+function toISOorEmpty(v) {
+  if (!v || !String(v).trim()) return "";
+  // v viene de <input type="datetime-local"> (ej: "2025-10-21T14:30")
+  // Lo convertimos a ISO con zona local -> UTC .toISOString()
+  try {
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString();
+  } catch {
+    return "";
+  }
+}
+
 const EditRequestDialog = ({
   open,
   onOpenChange,
@@ -28,58 +48,44 @@ const EditRequestDialog = ({
   setEditData,
   updateRequest,
   saving = false,
-  typeOptions = [],
-  channelOptions = [],
+  typeOptions = TYPE_OPTIONS,
+  channelOptions = CHANNEL_OPTIONS,
   departmentOptions = [],
 }) => {
   if (!open) return null;
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setEditData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+  const set = (patch) => setEditData((prev) => ({ ...prev, ...patch }));
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!requestId) return;
-    updateRequest(requestId);
-  };
 
-  const SelectOrInput = ({ id, name, label, value, onChange, options }) => {
-    const hasOptions = Array.isArray(options) && options.length > 0;
-    return (
-      <div>
-        <Label htmlFor={id}>{label}</Label>
-        {hasOptions ? (
-          <select
-            id={id}
-            name={name}
-            value={value ?? ""}
-            onChange={onChange}
-            disabled={saving}
-            className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-          >
-            <option value="">— Seleccionar —</option>
-            {options.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <Input
-            id={id}
-            name={name}
-            value={value ?? ""}
-            onChange={onChange}
-            disabled={saving}
-          />
-        )}
-      </div>
-    );
+    // --- Saneamos tipos y campos ---
+    const payload = {
+      // strings
+      title: (editData.title || "").trim(),
+      description: (editData.description || "").trim(),
+      type: editData.type || undefined,
+      channel: editData.channel || undefined,
+      department: editData.department || undefined,
+      priority: editData.priority || undefined,
+    };
+
+    // números
+    if (editData.level !== "" && editData.level != null)
+      payload.level = Number(editData.level);
+    if (editData.assigned_to !== "" && editData.assigned_to != null)
+      payload.assigned_to = Number(editData.assigned_to);
+    if (editData.estimated_hours !== "" && editData.estimated_hours != null) {
+      payload.estimated_hours = Number(editData.estimated_hours);
+    }
+
+    // fecha ISO (si viene)
+    const iso = toISOorEmpty(editData.estimated_due);
+    if (iso) payload.estimated_due = iso;
+
+    // Disparamos el update pasando payload ya limpio
+    updateRequest(requestId, payload);
   };
 
   return (
@@ -88,68 +94,139 @@ const EditRequestDialog = ({
         <DialogHeader>
           <DialogTitle>Editar Solicitud</DialogTitle>
           <DialogDescription>
-            Modifica los campos de la solicitud y guarda los cambios.
+            Modifica los campos y guarda los cambios.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Título */}
-          <div>
+          <div className="space-y-1">
             <Label htmlFor="title">Título</Label>
             <Input
               id="title"
-              name="title"
               value={editData.title ?? ""}
-              onChange={handleChange}
+              onChange={(e) => set({ title: e.target.value })}
               required
               disabled={saving}
             />
           </div>
 
-          {/* Descripción */}
-          <div>
+          <div className="space-y-1">
             <Label htmlFor="description">Descripción</Label>
             <Textarea
               id="description"
-              name="description"
               value={editData.description ?? ""}
-              onChange={handleChange}
+              onChange={(e) => set({ description: e.target.value })}
               rows={4}
               disabled={saving}
             />
           </div>
 
-          {/* Tipo */}
-          <SelectOrInput
-            id="type"
-            name="type"
-            label="Tipo"
-            value={editData.type}
-            onChange={handleChange}
-            options={typeOptions}
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label>Tipo</Label>
+              <Select
+                value={editData.type || ""}
+                onValueChange={(v) => set({ type: v })}
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {typeOptions.map((o) => (
+                    <SelectItem key={o} value={o}>
+                      {o}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          {/* Canal */}
-          <SelectOrInput
-            id="channel"
-            name="channel"
-            label="Canal"
-            value={editData.channel}
-            onChange={handleChange}
-            options={channelOptions}
-          />
+            <div className="space-y-1">
+              <Label>Canal</Label>
+              <Select
+                value={editData.channel || ""}
+                onValueChange={(v) => set({ channel: v })}
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  {channelOptions.map((o) => (
+                    <SelectItem key={o} value={o}>
+                      {o}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          {/* Departamento */}
-          <SelectOrInput
-            id="department"
-            name="department"
-            label="Departamento"
-            value={editData.department}
-            onChange={handleChange}
-            options={departmentOptions}
-          />
+            {departmentOptions.length > 0 && (
+              <div className="space-y-1 md:col-span-2">
+                <Label>Departamento</Label>
+                <Select
+                  value={editData.department || ""}
+                  onValueChange={(v) => set({ department: v })}
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departmentOptions.map((o) => (
+                      <SelectItem key={o} value={o}>
+                        {o}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-          {/* Acciones */}
+            <div className="space-y-1">
+              <Label>Nivel</Label>
+              <Select
+                value={String(editData.level ?? "")}
+                onValueChange={(v) => set({ level: v })}
+                disabled={saving}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 (simple/capacitación)</SelectItem>
+                  <SelectItem value="2">2 (soporte/correcciones)</SelectItem>
+                  <SelectItem value="3">
+                    3 (desarrollo/automatización)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Horas estimadas</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.5"
+                value={editData.estimated_hours ?? ""}
+                onChange={(e) => set({ estimated_hours: e.target.value })}
+                disabled={saving}
+              />
+            </div>
+
+            <div className="space-y-1 md:col-span-2">
+              <Label>Fecha compromiso (opcional)</Label>
+              <Input
+                type="datetime-local"
+                value={editData.estimated_due || ""}
+                onChange={(e) => set({ estimated_due: e.target.value })}
+                disabled={saving}
+              />
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 pt-4">
             <Button
               type="button"

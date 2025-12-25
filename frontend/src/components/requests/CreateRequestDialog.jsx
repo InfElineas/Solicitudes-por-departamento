@@ -1,5 +1,4 @@
 // src/components/requests/CreateRequestDialog.jsx
-
 import React from "react";
 import {
   DialogContent,
@@ -19,6 +18,15 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+// Enums unificados con App.js (VALID)
+const CHANNEL_OPTIONS = [
+  "Sistema",
+  "Google Sheets",
+  "Correo Electrónico",
+  "WhatsApp",
+];
+const TYPE_OPTIONS = ["Soporte", "Mejora", "Desarrollo", "Capacitación"];
+
 const CreateRequestDialog = ({
   user,
   users,
@@ -28,12 +36,54 @@ const CreateRequestDialog = ({
 }) => {
   const isAdmin = user?.role === "admin";
 
-  // ✅ Técnicos filtrados: soporte o admin y del depto Informática
-  const availableTechnicians = users.filter(
-    (u) =>
-      (u.role === "support" || u.role === "admin") &&
-      u.department === "Informática",
-  );
+  // Técnicos disponibles (soporte/admin del depto Informática)
+  const availableTechnicians = Array.isArray(users)
+    ? users.filter(
+        (u) =>
+          (u.role === "support" || u.role === "admin") &&
+          u.department === "Informática",
+      )
+    : [];
+
+  // Sanea y envía payload correcto al backend
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const payload = {
+      title: (newRequest.title || "").trim(),
+      description: (newRequest.description || "").trim(),
+      priority: newRequest.priority || "Media",
+      type: newRequest.type || "Soporte",
+      channel: newRequest.channel || "Sistema",
+    };
+
+    if (isAdmin) {
+      // level numérico
+      if (newRequest.level) payload.level = Number(newRequest.level);
+      // asignado opcional
+      if (newRequest.assigned_to) payload.assigned_to = newRequest.assigned_to;
+      // números si vienen
+      if (
+        newRequest.estimated_hours !== "" &&
+        newRequest.estimated_hours != null
+      ) {
+        payload.estimated_hours = Number(newRequest.estimated_hours);
+      }
+      // datetime ISO si viene
+      if ((newRequest.estimated_due || "").trim()) {
+        payload.estimated_due = newRequest.estimated_due;
+      }
+    }
+
+    createRequest({ preventDefault: () => {} }); // Para mantener compatibilidad si la prop esperaba evento
+    // Si tu createRequest ya arma su payload, puedes ignorar esto;
+    // si quieres mover la lógica al padre, pasa `payload` como argumento:
+    if (typeof createRequest === "function" && createRequest.length > 0) {
+      // Opcional: si tu createRequest acepta parámetros, pásale el payload:
+      try {
+        createRequest(payload);
+      } catch {}
+    }
+  };
 
   return (
     <DialogContent>
@@ -44,13 +94,13 @@ const CreateRequestDialog = ({
         </DialogDescription>
       </DialogHeader>
 
-      <form onSubmit={createRequest} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         {/* Título */}
         <div className="space-y-2">
           <Label htmlFor="title">Título</Label>
           <Input
             id="title"
-            value={newRequest.title}
+            value={newRequest.title || ""}
             onChange={(e) =>
               setNewRequest({ ...newRequest, title: e.target.value })
             }
@@ -63,7 +113,7 @@ const CreateRequestDialog = ({
           <Label htmlFor="description">Descripción</Label>
           <Textarea
             id="description"
-            value={newRequest.description}
+            value={newRequest.description || ""}
             onChange={(e) =>
               setNewRequest({ ...newRequest, description: e.target.value })
             }
@@ -77,7 +127,7 @@ const CreateRequestDialog = ({
           <div className="space-y-2">
             <Label>Prioridad</Label>
             <Select
-              value={newRequest.priority}
+              value={newRequest.priority || "Media"}
               onValueChange={(value) =>
                 setNewRequest({ ...newRequest, priority: value })
               }
@@ -94,9 +144,9 @@ const CreateRequestDialog = ({
           </div>
 
           <div className="space-y-2">
-            <Label>Tipo</Label>
+            <Label>Tipo de solicitud</Label>
             <Select
-              value={newRequest.type}
+              value={newRequest.type || "Soporte"}
               onValueChange={(value) =>
                 setNewRequest({ ...newRequest, type: value })
               }
@@ -105,18 +155,19 @@ const CreateRequestDialog = ({
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Soporte">Soporte</SelectItem>
-                <SelectItem value="Mejora">Mejora</SelectItem>
-                <SelectItem value="Desarrollo">Desarrollo</SelectItem>
-                <SelectItem value="Capacitación">Capacitación</SelectItem>
+                {TYPE_OPTIONS.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2 md:col-span-2">
-            <Label>Canal</Label>
+            <Label>Canal de la solicitud</Label>
             <Select
-              value={newRequest.channel}
+              value={newRequest.channel || "Sistema"}
               onValueChange={(value) =>
                 setNewRequest({ ...newRequest, channel: value })
               }
@@ -125,9 +176,11 @@ const CreateRequestDialog = ({
                 <SelectValue placeholder="Seleccionar" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Sistema">Sistema</SelectItem>
-                <SelectItem value="Correo">Correo</SelectItem>
-                <SelectItem value="WhatsApp">WhatsApp</SelectItem>
+                {CHANNEL_OPTIONS.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -140,11 +193,8 @@ const CreateRequestDialog = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Nivel</Label>
-                <DialogDescription>
-                  Define el nivel (1-3) y la prioridad
-                </DialogDescription>
                 <Select
-                  value={newRequest.level}
+                  value={String(newRequest.level || "1")}
                   onValueChange={(v) =>
                     setNewRequest({ ...newRequest, level: v })
                   }
@@ -165,7 +215,7 @@ const CreateRequestDialog = ({
               <div className="space-y-2">
                 <Label>Técnico (opcional)</Label>
                 <Select
-                  value={newRequest.assigned_to}
+                  value={newRequest.assigned_to || ""}
                   onValueChange={(v) =>
                     setNewRequest({ ...newRequest, assigned_to: v })
                   }
@@ -195,7 +245,7 @@ const CreateRequestDialog = ({
                   type="number"
                   min="0"
                   step="0.5"
-                  value={newRequest.estimated_hours}
+                  value={newRequest.estimated_hours ?? ""}
                   onChange={(e) =>
                     setNewRequest({
                       ...newRequest,
@@ -210,7 +260,7 @@ const CreateRequestDialog = ({
                 <Label>Fecha compromiso (opcional)</Label>
                 <Input
                   type="datetime-local"
-                  value={newRequest.estimated_due}
+                  value={newRequest.estimated_due || ""}
                   onChange={(e) =>
                     setNewRequest({
                       ...newRequest,

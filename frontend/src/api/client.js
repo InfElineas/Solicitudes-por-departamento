@@ -1,6 +1,7 @@
 // src/api/client.js
 import axios from "axios";
 import { toast } from "sonner";
+import { notifyAuthExpired } from "@/utils/session";
 
 const BASE = (
   process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"
@@ -32,9 +33,7 @@ api.interceptors.response.use(
       err?.response?.status === 401 &&
       !String(err?.config?.url || "").includes("/auth/login")
     ) {
-      localStorage.removeItem("token");
-      toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
-      setTimeout(() => window.location.reload(), 600);
+      notifyAuthExpired();
     } else if (!err.response) {
       toast.error(
         "No hay conexión con el backend. ¿Está levantado en http://localhost:8000 ?",

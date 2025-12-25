@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 import axios from "axios";
+import { AUTH_EXPIRED_EVENT, notifyAuthExpired } from "./utils/session";
 
 import {
   Dialog,
@@ -9,20 +10,21 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from "./components/ui/dialog"; // o '@/components/ui/dialog'
+} from "./components/ui/dialog";
 
 import AnalyticsView from "./components/analytics/AnalyticsView";
+import { buildPeriodParams } from "./components/analytics/analyticsUtils";
 import DepartmentsView from "./components/departaments/DepartmentsView.jsx";
 import UsersView from "./components/users/UsersView";
 import HeaderBar from "./components/layouts/HeaderBar.jsx";
+import NavigationTabs from "./components/layouts/NavigationTabs.jsx";
 import AssignDialog from "./components/requests/AssignDialog";
 
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { Badge } from "./components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
-
+import { Tabs, TabsContent } from "./components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -63,25 +65,62 @@ import {
 /* ===========================
    Axios client + interceptors
    =========================== */
-const BACKEND_URL =
-  process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
-const api = axios.create({ baseURL: `${BACKEND_URL.replace(/\/+$/, "")}/api` });
 
+// ¿Estamos en localhost?
+const isLocal =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
+// URL de backend (evitamos import.meta para no requerir <script type="module">)
+const RAW_BACKEND = (() => {
+  if (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) {
+    return process.env.REACT_APP_BACKEND_URL;
+  }
+
+  if (typeof window !== "undefined") {
+    // Opciones para despliegues con variables globales inyectadas
+    const globals = window.__API_URL || window.API_URL || window.BACKEND_URL;
+    if (globals) return globals;
+  }
+
+  return isLocal ? "http://localhost:8000" : "";
+})();
+
+// Normalizamos
+const API_BASE = RAW_BACKEND
+  ? `${RAW_BACKEND.replace(/\/+$/, "")}/api`
+  : "/api";
+
+const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
+
+// Inyecta Bearer
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
+// Reintentos básicos (2) en errores de red/timeout (útil para cold start)
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
-    if (err?.response?.status === 401) {
-      localStorage.removeItem("token");
-      if (!err?.config?.url?.includes("/auth/login")) {
-        toast.error("Tu sesión expiró. Inicia sesión nuevamente.");
-        setTimeout(() => window.location.reload(), 800);
+  async (err) => {
+    const cfg = err.config || {};
+    const retriable =
+      !err.response &&
+      (err.code === "ECONNABORTED" || err.message?.includes("Network Error"));
+
+    if (retriable) {
+      cfg.__retryCount = (cfg.__retryCount || 0) + 1;
+      if (cfg.__retryCount <= 2) {
+        const backoff = 500 * Math.pow(2, cfg.__retryCount - 1);
+        await new Promise((r) => setTimeout(r, backoff));
+        return api(cfg);
       }
+    }
+
+    if (err?.response?.status === 401 && !cfg?.url?.includes("/auth/login")) {
+      notifyAuthExpired();
     }
     return Promise.reject(err);
   },
@@ -94,6 +133,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [loading, setLoading] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   // pestaña activa (persistente)
   const [activeTab, setActiveTab] = useState(
@@ -150,12 +190,7 @@ function App() {
       "Estibadores",
     ],
     type: ["all", "Soporte", "Mejora", "Desarrollo", "Capacitación"],
-    level: [
-      "all",
-      "1 (simple/capacitación)",
-      "2 (soporte/correcciones)",
-      "3 (desarrollo/automatización)",
-    ],
+    level: ["all", "1", "2", "3"],
     channel: [
       "all",
       "Sistema",
@@ -188,9 +223,17 @@ function App() {
       channel: "all",
       q: "",
       sort: "-created_at",
+      created_by: "all",
+      assigned_by: "all",
+      assigned_to: "all",
     };
     const f = { ...def, ...(raw || {}) };
     const pick = (k) => (VALID[k].includes(f[k]) ? f[k] : def[k]);
+    const idOrAll = (val) => {
+      if (val === undefined || val === null) return "all";
+      const str = String(val).trim();
+      return str === "" || str === "all" ? "all" : str;
+    };
     return {
       status: pick("status"),
       department: pick("department"),
@@ -201,6 +244,9 @@ function App() {
       channel: pick("channel"),
       q: typeof f.q === "string" ? f.q : "",
       sort: pick("sort"),
+      created_by: idOrAll(f.created_by),
+      assigned_by: idOrAll(f.assigned_by),
+      assigned_to: idOrAll(f.assigned_to),
     };
   };
 
@@ -247,11 +293,22 @@ function App() {
   // analytics
   const [analytics, setAnalytics] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState(
-    () => localStorage.getItem("analyticsPeriod") || "month",
+    () => localStorage.getItem("analyticsPeriod") || "all",
   );
+  const [analyticsFilters, setAnalyticsFilters] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("analyticsFilters"));
+      return stored || { technician: "all", department: "all" };
+    } catch (e) {
+      return { technician: "all", department: "all" };
+    }
+  });
   useEffect(() => {
     localStorage.setItem("analyticsPeriod", analyticsPeriod);
   }, [analyticsPeriod]);
+  useEffect(() => {
+    localStorage.setItem("analyticsFilters", JSON.stringify(analyticsFilters));
+  }, [analyticsFilters]);
 
   // diálogos/acciones
   const [classifyDialogFor, setClassifyDialogFor] = useState(null);
@@ -282,31 +339,78 @@ function App() {
   });
   const departments = VALID.department.filter((d) => d !== "all");
 
+  const logout = useCallback((message) => {
+    setToken(null);
+    setUser(null);
+    localStorage.removeItem("token");
+    sessionStorage.removeItem("token");
+    localStorage.removeItem("access_token");
+    sessionStorage.removeItem("access_token");
+    setActiveTab("requests");
+    setAuthChecked(true);
+    if (message) toast.error(message);
+    else toast.success("Sesión cerrada");
+  }, []);
+
   /* ===========================
              Effects
      =========================== */
   useEffect(() => {
-    if (token) fetchCurrentUser();
+    const onExpired = (ev) =>
+      logout(
+        ev?.detail?.message || "Tu sesión expiró. Inicia sesión nuevamente.",
+      );
+    if (typeof window !== "undefined") {
+      window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+      }
+    };
+  }, [logout]);
+
+  useEffect(() => {
+    if (!token) {
+      setUser(null);
+      setAuthChecked(true);
+      return;
+    }
+    setAuthChecked(false);
+    fetchCurrentUser();
   }, [token]);
 
   useEffect(() => {
     if (!user) return;
     fetchRequests();
-    if (user.role === "admin") fetchUsers();
+  }, [user, page, pageSize, filters]);
+
+  useEffect(() => {
+    if (!user) return;
     if (user.role === "support" || user.role === "admin") fetchAnalytics();
-  }, [user, analyticsPeriod, page, pageSize, filters]);
+  }, [user, analyticsPeriod]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchUsers();
+  }, [user]);
 
   /* ===========================
             API calls
      =========================== */
+  const isUnauthorized = (error) => error?.response?.status === 401;
+
   const fetchCurrentUser = async () => {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
     } catch (error) {
       console.error("Error fetching user:", error);
-      logout();
+      if (!isUnauthorized(error)) {
+        logout("No se pudo validar tu sesión. Inicia sesión nuevamente.");
+      }
     }
+    setAuthChecked(true);
   };
 
   const fetchRequests = async () => {
@@ -322,6 +426,12 @@ function App() {
       if (filters.type !== "all") params.set("type", filters.type);
       if (filters.level !== "all") params.set("level", Number(filters.level));
       if (filters.channel !== "all") params.set("channel", filters.channel);
+      if (filters.created_by !== "all")
+        params.set("created_by", filters.created_by);
+      if (filters.assigned_by !== "all")
+        params.set("assigned_by", filters.assigned_by);
+      if (filters.assigned_to !== "all")
+        params.set("assigned_to", filters.assigned_to);
 
       const { data } = await api.get(`/requests?${params.toString()}`);
       setRequests(data.items || []);
@@ -329,6 +439,7 @@ function App() {
       setTotalPages(data.total_pages || 1);
     } catch (error) {
       console.error("Error fetching requests:", error?.response || error);
+      if (isUnauthorized(error)) return;
       toast.error("Error al cargar solicitudes");
       setRequests([]);
       setTotal(0);
@@ -342,18 +453,35 @@ function App() {
       setUsers(data);
     } catch (error) {
       console.error("Error fetching users:", error);
+      if (isUnauthorized(error)) return;
       toast.error("Error al cargar usuarios");
     }
   };
 
-  const periodMap = { day: "daily", week: "weekly", month: "monthly" };
   const fetchAnalytics = async () => {
     try {
-      const period = periodMap[analyticsPeriod] || "monthly";
-      const { data } = await api.get(`/reports/summary?period=${period}`);
-      setAnalytics(data);
+      const params = buildPeriodParams(analyticsPeriod);
+      const baseUrl = "/reports/summary";
+      const qs = params.toString();
+      const requestUrl = qs ? `${baseUrl}?${qs}` : baseUrl;
+      const { data } = await api.get(requestUrl);
+      setAnalytics({ ...data, _period: analyticsPeriod });
     } catch (error) {
+      // En algunos despliegues el backend no acepta range=all. Reintentamos sin parámetros.
+      if (analyticsPeriod === "all" && error?.response?.status === 422) {
+        try {
+          const { data } = await api.get("/reports/summary");
+          setAnalytics({ ...data, _period: analyticsPeriod });
+          return;
+        } catch (fallbackError) {
+          console.error("Error fetching analytics fallback:", fallbackError);
+          if (!isUnauthorized(fallbackError))
+            toast.error("Error al cargar análisis");
+          return;
+        }
+      }
       console.error("Error fetching analytics:", error);
+      if (isUnauthorized(error)) return;
       toast.error("Error al cargar análisis");
     }
   };
@@ -369,6 +497,7 @@ function App() {
       );
       const { access_token } = data;
       localStorage.setItem("token", access_token);
+      setAuthChecked(false);
       setToken(access_token);
       toast.success("¡Bienvenido!");
     } catch (error) {
@@ -376,14 +505,6 @@ function App() {
       toast.error(error?.response?.data?.detail || "Credenciales incorrectas");
     }
     setLoading(false);
-  };
-
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem("token");
-    setActiveTab("requests");
-    toast.success("Sesión cerrada");
   };
 
   // Crear solicitud
@@ -654,54 +775,95 @@ function App() {
   /* ===========================
                UI
      =========================== */
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="text-sm text-gray-600">Validando sesión…</div>
+      </div>
+    );
+  }
+
   if (!token) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold text-gray-900">
-              Sistema de Solicitudes
-            </CardTitle>
-            <CardDescription>Inicia sesión para continuar</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={login} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="username">Usuario</Label>
-                <Input
-                  id="username"
-                  type="text"
-                  value={loginData.username}
-                  onChange={(e) =>
-                    setLoginData({ ...loginData, username: e.target.value })
-                  }
-                  required
-                />
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <Card className="lg:col-span-2 bg-white/70 backdrop-blur shadow-sm border border-indigo-50">
+            <CardHeader className="space-y-2">
+              <CardTitle className="text-2xl font-bold text-gray-900">
+                Sistema de Solicitudes
+              </CardTitle>
+              <CardDescription className="text-sm text-gray-700">
+                Gestiona, asigna y da seguimiento a las solicitudes con una
+                interfaz optimizada para cualquier dispositivo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-sm text-gray-600 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-green-500" /> Sesión
+                segura y control de tiempo de inactividad.
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Contraseña</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={loginData.password}
-                  onChange={(e) =>
-                    setLoginData({ ...loginData, password: e.target.value })
-                  }
-                  required
-                />
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-blue-500" /> Experiencia
+                responsiva en móvil, tablet y desktop.
               </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Iniciando sesión..." : "Iniciar sesión"}
-              </Button>
-            </form>
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-              <p className="text-xs font-normal text-gray-700 mb-2">
-                Plataforma desarrollada por el grupo de Soporte de Elineas
-              </p>
-              <div className="text-xs text-gray-600 space-y-1"></div>
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-purple-500" /> Paneles
+                de métricas en tiempo real.
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="lg:col-span-3 shadow-sm">
+            <CardHeader className="text-center space-y-1">
+              <CardTitle className="text-2xl font-bold text-gray-900">
+                Inicia sesión
+              </CardTitle>
+              <CardDescription>
+                Accede con tus credenciales corporativas.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={login} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Usuario</Label>
+                  <Input
+                    id="username"
+                    type="text"
+                    value={loginData.username}
+                    onChange={(e) =>
+                      setLoginData({ ...loginData, username: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Contraseña</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={loginData.password}
+                    onChange={(e) =>
+                      setLoginData({ ...loginData, password: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={loading}>
+                  {loading ? "Iniciando sesión..." : "Iniciar sesión"}
+                </Button>
+              </form>
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg text-left">
+                <p className="text-xs font-normal text-gray-700 mb-1">
+                  Plataforma desarrollada por el equipo de Soporte.
+                </p>
+                <p className="text-xs text-gray-600">
+                  Si tu sesión expira, volverás automáticamente a esta pantalla
+                  para mantener la seguridad.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -714,53 +876,11 @@ function App() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger
-              value="requests"
-              className="flex items-center space-x-2"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Solicitudes</span>
-            </TabsTrigger>
-            {(user?.role === "support" || user?.role === "admin") && (
-              <TabsTrigger
-                value="analytics"
-                className="flex items-center space-x-2"
-              >
-                <BarChart3 className="h-4 w-4" />
-                <span>Análisis</span>
-              </TabsTrigger>
-            )}
-
-            {user?.role === "admin" && (
-              <TabsTrigger
-                value="trash"
-                className="flex items-center space-x-2"
-              >
-                <FileText className="h-4 w-4" />
-                <span>Papelera</span>
-              </TabsTrigger>
-            )}
-
-            {user?.role === "admin" && (
-              <>
-                <TabsTrigger
-                  value="users"
-                  className="flex items-center space-x-2"
-                >
-                  <Users className="h-4 w-4" />
-                  <span>Usuarios</span>
-                </TabsTrigger>
-                <TabsTrigger
-                  value="departments"
-                  className="flex items-center space-x-2"
-                >
-                  <Building className="h-4 w-4" />
-                  <span>Departamentos</span>
-                </TabsTrigger>
-              </>
-            )}
-          </TabsList>
+          <div className="sticky top-0 z-10 bg-gray-50 -mx-4 sm:mx-0 pb-4">
+            <div className="px-4 sm:px-0">
+              <NavigationTabs user={user} />
+            </div>
+          </div>
 
           {/* Requests Tab */}
           <TabsContent value="requests" className="space-y-4">
@@ -805,6 +925,10 @@ function App() {
                 analytics={analytics}
                 analyticsPeriod={analyticsPeriod}
                 setAnalyticsPeriod={setAnalyticsPeriod}
+                analyticsFilters={analyticsFilters}
+                setAnalyticsFilters={setAnalyticsFilters}
+                users={users}
+                departments={departments}
               />
             </TabsContent>
           )}
