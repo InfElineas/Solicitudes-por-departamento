@@ -62,7 +62,12 @@ export const pickProductivityRows = (analytics = {}, period = "all") => {
       analytics.all_productivity,
     );
   }
-  candidates.push(analytics.productivity_by_tech, analytics.productivity);
+
+  try {
+    candidates.push(analytics.productivity_by_tech, analytics.productivity);
+  } catch (error) {
+    console.error(error);
+  }
 
   const dataset = candidates.find(
     (arr) => Array.isArray(arr) && arr.length > 0,
