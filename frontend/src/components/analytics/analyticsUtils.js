@@ -54,16 +54,16 @@ export const buildPeriodParams = (period = "all", now = new Date()) => {
 
 export const pickProductivityRows = (analytics = {}, period = "all") => {
   const candidates = [];
-  if (period === "all") {
-    candidates.push(
-      analytics.all_time_productivity,
-      analytics.productivity_all,
-      analytics.productivity_total,
-      analytics.all_productivity,
-    );
-  }
 
   try {
+    if (period === "all") {
+      candidates.push(
+        analytics.all_time_productivity,
+        analytics.productivity_all,
+        analytics.productivity_total,
+        analytics.all_productivity,
+      );
+    }
     candidates.push(analytics.productivity_by_tech, analytics.productivity);
   } catch (error) {
     console.error(error);
