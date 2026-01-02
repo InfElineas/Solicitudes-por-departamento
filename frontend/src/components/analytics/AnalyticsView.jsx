@@ -46,23 +46,12 @@ function AnalyticsView({
     [filtered],
   );
   const maxTotal = useMemo(
-    () =>
-      Math.max(
-        ...filtered.map(
-          (row) =>
-            (Number(row.assigned) || 0) +
-            (Number(row.inProgress) || 0) +
-            (Number(row.inReview) || 0) +
-            (Number(row.finished) || 0) +
-            (Number(row.pending) || 0),
-        ),
-        0,
-      ),
+    () => Math.max(...filtered.map((row) => Number(row.assigned) || 0), 0),
     [filtered],
   );
 
   const technicianOptions =
-    users.length > 0 ? users : analytics?.productivity_by_tech || [];
+    users.length > 0 ? users : analytics?.productivity || [];
 
   const handleFilterChange = (key, value) => {
     setAnalyticsFilters((prev) => ({ ...prev, [key]: value }));
@@ -112,7 +101,7 @@ function AnalyticsView({
             </SelectContent>
           </Select>
 
-          <Select
+          {/* <Select
             value={analyticsFilters?.department || "all"}
             onValueChange={(value) => handleFilterChange("department", value)}
           >
@@ -127,7 +116,7 @@ function AnalyticsView({
                 </SelectItem>
               ))}
             </SelectContent>
-          </Select>
+          </Select> */}
         </div>
       </div>
 
@@ -153,15 +142,16 @@ function AnalyticsView({
               valueClass="text-green-600"
             />
             <SummaryCard
-              icon={<Clock className="h-4 w-4 text-blue-600" />}
+              icon={<Clock className="h-4 w-4 text-sky-600" />}
               label="En proceso"
               value={global.inProgress}
-              valueClass="text-blue-600"
+              valueClass="text-sky-600"
             />
             <SummaryCard
-              icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+              icon={<TrendingUp className="h-4 w-4 text-indigo-600" />}
               label="En revisión"
               value={global.inReview}
+              valueClass="text-indigo-600"
             />
             <SummaryCard
               icon={<Settings2 className="h-4 w-4 text-orange-600" />}
@@ -293,11 +283,10 @@ function AnalyticsView({
                 )}
                 {!noData && (
                   <div className="flex flex-wrap gap-3 text-xs text-gray-600 pt-2">
-                    <LegendDot color="bg-sky-500" label="Asignadas" />
-                    <LegendDot color="bg-indigo-500" label="En proceso" />
-                    <LegendDot color="bg-orange-500" label="En revisión" />
+                    <LegendDot color="bg-orange-500" label="Pendientes" />
+                    <LegendDot color="bg-sky-500" label="En proceso" />
+                    <LegendDot color="bg-indigo-500" label="En revisión" />
                     <LegendDot color="bg-green-500" label="Finalizadas" />
-                    <LegendDot color="bg-amber-500" label="Pendientes" />
                   </div>
                 )}
               </CardContent>
@@ -393,11 +382,10 @@ const BarItem = ({ label, value = 0, max = 0, colorClass }) => {
 
 const StackedBar = ({ row, max = 0 }) => {
   const segments = [
-    { key: "assigned", label: "Asignadas", color: "bg-sky-500" },
-    { key: "inProgress", label: "En proceso", color: "bg-indigo-500" },
-    { key: "inReview", label: "En revisión", color: "bg-orange-500" },
+    { key: "pending", label: "Pendientes", color: "bg-orange-500" },
+    { key: "inProgress", label: "En proceso", color: "bg-sky-500" },
+    { key: "inReview", label: "En revisión", color: "bg-indigo-500" },
     { key: "finished", label: "Finalizadas", color: "bg-green-500" },
-    { key: "pending", label: "Pendientes", color: "bg-amber-500" },
   ];
 
   const total = segments.reduce(

@@ -104,67 +104,43 @@ const extractStatusBreakdown = (row) => {
 };
 
 export const normalizeProductivityRows = (rows = []) => {
-  return rows.map((row) => {
-    const statusCounts = extractStatusBreakdown(row);
-    const hasStatusBreakdown = Object.keys(statusCounts).length > 0;
+  if (!rows.productivity) return [];
+  else
+    return rows.productivity.map((row) => {
+      // const statusCounts = extractStatusBreakdown(row);
+      // const hasStatusBreakdown = Object.keys(statusCounts).length > 0;
 
-    const pending = coalesce(
-      statusCounts.pending,
-      row?.pending_now,
-      row?.pending,
-    );
-    const inProgress = coalesce(
-      statusCounts.inProgress,
-      row?.in_progress,
-      row?.progress,
-    );
-    const inReview = coalesce(
-      statusCounts.inReview,
-      row?.in_review,
-      row?.review,
-    );
-    const finished = coalesce(
-      statusCounts.finished,
-      row?.attended_period,
-      row?.finished,
-      row?.finalizadas,
-    );
+      const pending = row?.pending_now ?? row?.pending;
 
-    const statusTotal = pending + inProgress + inReview + finished;
-    const assigned = hasStatusBreakdown
-      ? statusTotal
-      : coalesce(
-          row?.assigned_period,
-          row?.assigned,
-          row?.total_assigned,
-          row?.assigned_total,
-          row?.total,
-          row?.count,
-          statusTotal,
-        );
+      const inProgress = row?.in_progress ?? row?.progress;
 
-    return {
-      user_id:
-        row?.user_id ??
-        row?.id ??
-        row?.user ??
-        row?.username ??
-        row?.name ??
-        "unknown",
-      name: row?.name || row?.full_name || row?.username || "Sin nombre",
-      department:
-        row?.department ||
-        row?.department_name ||
-        row?.dept ||
-        row?.area ||
-        "Sin departamento",
-      assigned,
-      inProgress,
-      inReview,
-      finished,
-      pending,
-    };
-  });
+      const inReview = row?.in_review ?? row?.review;
+
+      const finished = row?.attended_period ?? row?.finished;
+
+      // const statusTotal = pending + inProgress + inReview + finished;
+
+      const assigned =
+        row?.assigned_total ??
+        row?.assigned_period ??
+        row?.assigned ??
+        row?.total;
+
+      return {
+        user_id: row?.user_id ?? row?.id ?? row?.user ?? "Desconocido",
+        name: row?.name || row?.full_name || row?.username || "Sin nombre",
+        department:
+          row?.department ??
+          row?.department_name ??
+          row?.dept ??
+          "Sin departamento",
+        assigned,
+        inProgress,
+        inReview,
+        finished,
+        pending,
+      };
+    });
 };
 
 export const buildRanking = (rows = []) => {
@@ -195,7 +171,11 @@ export const filterProductivityRows = (rows, filters = {}) => {
   });
 };
 
-export const computeGlobalMetrics = (rows = []) => {
+export const computeGlobalMetrics = (
+  rows = [],
+  source = {},
+  global = false,
+) => {
   const totals = rows.reduce(
     (acc, row) => {
       acc.assigned += Number(row.assigned) || 0;
@@ -208,6 +188,13 @@ export const computeGlobalMetrics = (rows = []) => {
     { assigned: 0, inProgress: 0, inReview: 0, finished: 0, pending: 0 },
   );
 
+  const assigned = global ? source?.assigned ?? 0 : totals.assigned ?? 0;
+  const inProgress = global
+    ? source?.progress_now ?? 0
+    : totals.inProgress ?? 0;
+  const inReview = global ? source?.in_review ?? 0 : totals.inReview ?? 0;
+  const finished = global ? source?.finished ?? 0 : totals.finished ?? 0;
+  const pending = global ? source?.pending_now ?? 0 : totals.pending ?? 0;
   const technicianCount = rows.length;
   const averagePerTech = technicianCount
     ? totals.assigned / technicianCount
@@ -215,10 +202,14 @@ export const computeGlobalMetrics = (rows = []) => {
   const averageFinishedPerTech = technicianCount
     ? totals.finished / technicianCount
     : 0;
-  const active = totals.inProgress + totals.inReview + totals.pending;
+  const active = totals.inProgress + totals.inReview || 0;
 
   return {
-    ...totals,
+    assigned,
+    inProgress,
+    inReview,
+    finished,
+    pending,
     active,
     technicianCount,
     averagePerTech,
@@ -228,10 +219,14 @@ export const computeGlobalMetrics = (rows = []) => {
 
 export const useProductivity = (analytics, filters, period = "all") => {
   return useMemo(() => {
-    const source = pickProductivityRows(analytics, period);
-    const normalized = normalizeProductivityRows(source || []);
-    const filtered = filterProductivityRows(normalized, filters);
-    const global = computeGlobalMetrics(filtered);
+    // const source = pickProductivityRows(analytics, period); // Ya no es necesario ya que removí los valores globales.
+    const normalized = normalizeProductivityRows(analytics || []); //Cambia su formato o un equivalente. Es realmente necesario?
+    const filtered = filterProductivityRows(normalized, filters); //Trabajo real, filtra las filas que nos interesan.
+    const global = computeGlobalMetrics(
+      filtered,
+      analytics,
+      filters.technician == "all",
+    );
     const ranking = buildRanking(filtered);
     return { normalized, filtered, global, ranking };
   }, [analytics, filters, period]);
