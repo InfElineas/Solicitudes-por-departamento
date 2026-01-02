@@ -487,7 +487,11 @@ function App() {
   };
 
   const login = async (e) => {
-    e.preventDefault();
+    try {
+      e.preventDefault();
+    } catch (error) {
+      console.error(error);
+    }
     setLoading(true);
     try {
       const { data } = await api.post(
@@ -509,7 +513,11 @@ function App() {
 
   // Crear solicitud
   const createRequest = async (e) => {
-    e.preventDefault();
+    try {
+      e.preventDefault();
+    } catch (error) {
+      console.error(error);
+    }
     try {
       const payload = {
         title: newRequest.title,
@@ -564,7 +572,11 @@ function App() {
 
   // Crear usuario (admin)
   const createUser = async (e) => {
-    e.preventDefault();
+    try {
+      e.preventDefault();
+    } catch (error) {
+      console.error(error);
+    }
     try {
       await api.post("/users", newUser);
       setNewUser({
