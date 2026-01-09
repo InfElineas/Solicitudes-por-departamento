@@ -188,13 +188,13 @@ export const computeGlobalMetrics = (
     { assigned: 0, inProgress: 0, inReview: 0, finished: 0, pending: 0 },
   );
 
-  const assigned = global ? source?.assigned ?? 0 : totals.assigned ?? 0;
+  const assigned = global ? (source?.assigned ?? 0) : (totals.assigned ?? 0);
   const inProgress = global
-    ? source?.progress_now ?? 0
-    : totals.inProgress ?? 0;
-  const inReview = global ? source?.in_review ?? 0 : totals.inReview ?? 0;
-  const finished = global ? source?.finished ?? 0 : totals.finished ?? 0;
-  const pending = global ? source?.pending_now ?? 0 : totals.pending ?? 0;
+    ? (source?.progress_now ?? 0)
+    : (totals.inProgress ?? 0);
+  const inReview = global ? (source?.in_review ?? 0) : (totals.inReview ?? 0);
+  const finished = global ? (source?.finished ?? 0) : (totals.finished ?? 0);
+  const pending = global ? (source?.pending_now ?? 0) : (totals.pending ?? 0);
   const technicianCount = rows.length;
   const averagePerTech = technicianCount
     ? totals.assigned / technicianCount

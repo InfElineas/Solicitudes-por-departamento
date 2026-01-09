@@ -9,7 +9,7 @@ function HeaderBar({ user, onLogout }) {
   return (
     <header className="bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
+        <div className="flex justify-between items-center h-16 flex-wrap">
           {/* Logo y título */}
           <div className="flex items-center space-x-2">
             <FileText className="h-8 w-8 text-indigo-600" />
@@ -23,7 +23,10 @@ function HeaderBar({ user, onLogout }) {
             <div className="flex items-center space-x-2 text-sm text-gray-700 truncate max-w-xs">
               <User className="h-4 w-4 text-gray-500" />
               <span className="truncate">{user?.full_name}</span>
-              <Badge variant="secondary" className="text-xs capitalize">
+              <Badge
+                variant="secondary"
+                className="text-xs capitalize max-sm:hidden"
+              >
                 {user?.role === "admin"
                   ? "Administrador"
                   : user?.role === "support"

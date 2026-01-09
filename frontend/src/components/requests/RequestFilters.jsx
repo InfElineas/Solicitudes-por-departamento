@@ -45,7 +45,7 @@ const RequestFilters = ({
   const userLabel = (u) => u?.full_name || u?.username || `Usuario ${u?.id}`;
 
   return (
-    <div className="bg-white border rounded-lg p-4 grid grid-cols-1 md:grid-cols-7 gap-4">
+    <div className="bg-white border rounded-lg p-4 grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">
       {/* Buscar */}
       <div className="md:col-span-2">
         <Label className="text-sm">Buscar</Label>
@@ -160,7 +160,7 @@ const RequestFilters = ({
       </div>
 
       {/* Asignado a */}
-      <div className="md:col-span-2">
+      <div className="lg:col-span-2">
         <Label className="text-sm">Asignado a</Label>
         <Select
           value={filters.assigned_to}
@@ -223,7 +223,7 @@ const RequestFilters = ({
       </div>
 
       {/* Orden */}
-      <div className="md:col-span-3">
+      <div className="md:col-span-2 lg:col-span-3">
         <Label className="text-sm">Orden</Label>
         <Select
           value={filters.sort}
