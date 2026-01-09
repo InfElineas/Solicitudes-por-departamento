@@ -28,6 +28,7 @@ const RequestFilters = ({
   departments,
   setPage,
   users = [],
+  user,
 }) => {
   const handleChange = (field, value) => {
     setFilters({ ...filters, [field]: value });
@@ -44,7 +45,7 @@ const RequestFilters = ({
   const userLabel = (u) => u?.full_name || u?.username || `Usuario ${u?.id}`;
 
   return (
-    <div className="bg-white border rounded-lg p-4 grid grid-cols-1 md:grid-cols-8 gap-4">
+    <div className="bg-white border rounded-lg p-4 grid grid-cols-1 md:grid-cols-7 gap-4">
       {/* Buscar */}
       <div className="md:col-span-2">
         <Label className="text-sm">Buscar</Label>
@@ -158,19 +159,19 @@ const RequestFilters = ({
         </Select>
       </div>
 
-      {/* Creado por */}
-      <div>
-        <Label className="text-sm">Creado por</Label>
+      {/* Asignado a */}
+      <div className="md:col-span-2">
+        <Label className="text-sm">Asignado a</Label>
         <Select
-          value={filters.created_by}
-          onValueChange={(value) => handleChange("created_by", value)}
+          value={filters.assigned_to}
+          onValueChange={(value) => handleChange("assigned_to", value)}
         >
           <SelectTrigger>
-            <SelectValue placeholder="Todos" />
+            <SelectValue placeholder={user.id ?? "Todos"} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            {creatorOptions.map((u) => (
+            {assigneeOptions.map((u) => (
               <SelectItem key={u.id} value={String(u.id)}>
                 {userLabel(u)}
               </SelectItem>
@@ -200,19 +201,19 @@ const RequestFilters = ({
         </Select>
       </div>
 
-      {/* Asignado a */}
+      {/* Creado por */}
       <div>
-        <Label className="text-sm">Asignado a</Label>
+        <Label className="text-sm">Creado por</Label>
         <Select
-          value={filters.assigned_to}
-          onValueChange={(value) => handleChange("assigned_to", value)}
+          value={filters.created_by}
+          onValueChange={(value) => handleChange("created_by", value)}
         >
           <SelectTrigger>
             <SelectValue placeholder="Todos" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            {assigneeOptions.map((u) => (
+            {creatorOptions.map((u) => (
               <SelectItem key={u.id} value={String(u.id)}>
                 {userLabel(u)}
               </SelectItem>
@@ -222,7 +223,7 @@ const RequestFilters = ({
       </div>
 
       {/* Orden */}
-      <div className="md:col-span-2">
+      <div className="md:col-span-3">
         <Label className="text-sm">Orden</Label>
         <Select
           value={filters.sort}

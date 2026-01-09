@@ -163,7 +163,11 @@ const RequestsView = ({
       const detail = error?.response?.data?.detail;
       console.error("❌ PUT /requests/:id error", { status, detail, error });
       alert(
-        `No se pudo actualizar la solicitud.\n${Array.isArray(detail) ? JSON.stringify(detail) : detail || error.message}`,
+        `No se pudo actualizar la solicitud.\n${
+          Array.isArray(detail)
+            ? JSON.stringify(detail)
+            : detail || error.message
+        }`,
       );
     } finally {
       setSaving(false);
@@ -201,6 +205,7 @@ const RequestsView = ({
         departments={departments}
         setPage={setPage}
         users={users}
+        user={user}
       />
 
       <PaginationControls
@@ -305,7 +310,9 @@ function PaginationControls({
 }) {
   return (
     <div
-      className={`flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${position === "top" ? "" : "mt-6"}`}
+      className={`flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
+        position === "top" ? "" : "mt-6"
+      }`}
       data-testid={`pagination-${position}`}
     >
       <div className="text-sm text-gray-600">
