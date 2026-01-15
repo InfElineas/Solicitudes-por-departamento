@@ -57,12 +57,6 @@ const fmtDate = (d) => {
   }
 };
 
-const truncateText = (value, max = 40) => {
-  if (!value) return "";
-  const str = String(value);
-  return str.length > max ? `${str.slice(0, max)}…` : str;
-};
-
 const RequestCard = ({
   request,
   user,
@@ -117,19 +111,13 @@ const RequestCard = ({
     requester_id,
   } = request || {};
 
-  const truncatedTitle = truncateText(title);
-  const truncatedDescription = truncateText(description);
-
   return (
     <Card className="shadow-sm border border-gray-100">
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-2 min-w-0">
-            <CardTitle
-              className="text-lg leading-snug break-words"
-              title={title}
-            >
-              {truncatedTitle}
+            <CardTitle className="text-lg leading-snug truncate" title={title}>
+              {title}
             </CardTitle>
             <CardDescription className="space-y-1">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-700">
@@ -182,8 +170,11 @@ const RequestCard = ({
 
       <CardContent className="space-y-4">
         {description && (
-          <p className="text-gray-700 leading-relaxed" title={description}>
-            {truncatedDescription}
+          <p
+            className="text-gray-700 leading-relaxed truncate"
+            title={description}
+          >
+            {description}
           </p>
         )}
 
