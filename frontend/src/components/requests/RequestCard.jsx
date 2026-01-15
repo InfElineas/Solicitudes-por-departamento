@@ -57,7 +57,7 @@ const fmtDate = (d) => {
   }
 };
 
-const truncateText = (value, max = 20) => {
+const truncateText = (value, max = 40) => {
   if (!value) return "";
   const str = String(value);
   return str.length > max ? `${str.slice(0, max)}…` : str;
