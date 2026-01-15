@@ -130,9 +130,9 @@ const RequestFilters = ({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="1">1</SelectItem>
-            <SelectItem value="2">2</SelectItem>
-            <SelectItem value="3">3</SelectItem>
+            <SelectItem value="1">1 (simple/capacitación)</SelectItem>
+            <SelectItem value="2">2 (soporte/correcciones)</SelectItem>
+            <SelectItem value="3">3 (desarrollo/automatización)</SelectItem>
           </SelectContent>
         </Select>
       </div>
