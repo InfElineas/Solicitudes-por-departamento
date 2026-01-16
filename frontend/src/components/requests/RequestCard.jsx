@@ -83,7 +83,7 @@ const RequestCard = ({
     if (!user) return false;
     // contemplamos diferentes campos de id de asignación
     const assignedTo = request.assigned_to || request.assigned_to_id;
-    const assignedBy = request.assigned_by_id || request.assigned_by;
+    const assignedBy = request.requester_id || request.assigned_by;
     return (
       user.role === "admin" || user.id === assignedTo || user.id === assignedBy
     );
@@ -98,7 +98,7 @@ const RequestCard = ({
     level,
     type,
     channel,
-    assigned_by_name,
+    requester_id,
     review_evidence,
     status,
     rejection_reason,
@@ -108,7 +108,6 @@ const RequestCard = ({
     estimated_hours,
     estimated_due,
     feedback,
-    requester_id,
   } = request || {};
 
   return (
@@ -135,9 +134,9 @@ const RequestCard = ({
                 <span>{type || "-"}</span>
                 <span className="font-medium">Canal:</span>{" "}
                 <span>{channel || "-"}</span>
-                {assigned_by_name && (
+                {requester_name && (
                   <span className="font-medium">
-                    Asignado por: {assigned_by_name}
+                    Asignado por: {requester_name}
                   </span>
                 )}
                 {review_evidence?.url && (

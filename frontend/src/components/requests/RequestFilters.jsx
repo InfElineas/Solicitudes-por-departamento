@@ -186,12 +186,12 @@ const RequestFilters = ({
         </Select>
       </div>
 
-      {/* Asignado por */}
-      <div>
-        <Label className="text-sm">Asignado por</Label>
+      {/* Solicitado por */}
+      <div className="lg:col-span-2">
+        <Label className="text-sm">Solicitado por</Label>
         <Select
-          value={filters.assigned_by}
-          onValueChange={(value) => handleChange("assigned_by", value)}
+          value={filters.requester_id}
+          onValueChange={(value) => handleChange("requester_id", value)}
         >
           <SelectTrigger>
             <SelectValue placeholder="Todos" />
@@ -199,27 +199,6 @@ const RequestFilters = ({
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
             {assignerOptions.map((u) => (
-              <SelectItem key={u.id} value={String(u.id)}>
-                {userLabel(u)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Creado por */}
-      <div>
-        <Label className="text-sm">Creado por</Label>
-        <Select
-          value={filters.created_by}
-          onValueChange={(value) => handleChange("created_by", value)}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Todos" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            {creatorOptions.map((u) => (
               <SelectItem key={u.id} value={String(u.id)}>
                 {userLabel(u)}
               </SelectItem>

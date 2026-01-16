@@ -223,8 +223,7 @@ function App() {
       channel: "all",
       q: "",
       sort: "-created_at",
-      created_by: "all",
-      assigned_by: "all",
+      requester_id: "all",
       assigned_to: "all",
     };
     const f = { ...def, ...(raw || {}) };
@@ -244,8 +243,7 @@ function App() {
       channel: pick("channel"),
       q: typeof f.q === "string" ? f.q : "",
       sort: pick("sort"),
-      created_by: idOrAll(f.created_by),
-      assigned_by: idOrAll(f.assigned_by),
+      requester_id: idOrAll(f.requester_id),
       assigned_to: idOrAll(f.assigned_to),
     };
   };
@@ -426,10 +424,8 @@ function App() {
       if (filters.type !== "all") params.set("type", filters.type);
       if (filters.level !== "all") params.set("level", Number(filters.level));
       if (filters.channel !== "all") params.set("channel", filters.channel);
-      if (filters.created_by !== "all")
-        params.set("created_by", filters.created_by);
-      if (filters.assigned_by !== "all")
-        params.set("assigned_by", filters.assigned_by);
+      if (filters.requester_id !== "all")
+        params.set("requester_id", filters.requester_id);
       if (filters.assigned_to !== "all")
         params.set("assigned_to", filters.assigned_to);
 
@@ -687,7 +683,7 @@ function App() {
     if (!user) return false;
     return (
       user.id === req.assigned_to ||
-      user.id === req.assigned_by_id ||
+      user.id === req.requester_id ||
       user.role === "admin"
     );
   };
