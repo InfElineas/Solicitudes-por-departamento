@@ -194,7 +194,13 @@ const RequestFilters = ({
           onValueChange={(value) => handleChange("requester_id", value)}
         >
           <SelectTrigger>
-            <SelectValue placeholder="Todos" />
+            <SelectValue
+              placeholder={
+                user.role === "support" || user.role === "admin"
+                  ? "Todos"
+                  : user.id ?? "Todos"
+              }
+            />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
