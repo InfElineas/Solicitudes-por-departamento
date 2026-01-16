@@ -234,10 +234,10 @@ const RequestFilters = ({
             </SelectItem>
             <SelectItem value="status">Estado (A→Z)</SelectItem>
             <SelectItem value="-status">Estado (Z→A)</SelectItem>
-            <SelectItem value="department">Depto (A→Z)</SelectItem>
-            <SelectItem value="-department">Depto (Z→A)</SelectItem>
-            <SelectItem value="priority">Prioridad (A→Z)</SelectItem>
-            <SelectItem value="-priority">Prioridad (Z→A)</SelectItem>
+            <SelectItem value="department">Departamento (A→Z)</SelectItem>
+            <SelectItem value="-department">Departamento (Z→A)</SelectItem>
+            <SelectItem value="-priority">Prioridad (Alta→Baja)</SelectItem>
+            <SelectItem value="priority">Prioridad (Baja→Alta)</SelectItem>
             <SelectItem value="level">Nivel (1→3)</SelectItem>
             <SelectItem value="-level">Nivel (3→1)</SelectItem>
           </SelectContent>
