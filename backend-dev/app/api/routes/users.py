@@ -21,6 +21,42 @@ async def create_user(payload: dict, current=Depends(require_role(["admin"]))):
 async def list_users(current=Depends(require_role(["admin"]))):
     return await get_db().users.find().to_list(1000)
 
+from datetime import datetime
+
+@router.patch("/{user_id}")
+async def update_user(
+    user_id: str,
+    payload: dict,
+    current=Depends(require_role(["admin"]))
+):
+    db = get_db()
+
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    # No permitir cambiar username a uno existente
+    if "username" in payload and payload["username"] != user["username"]:
+        if await db.users.find_one({"username": payload["username"]}):
+            raise HTTPException(400, "Username ya existe")
+
+    update_data = {k: v for k, v in payload.items() if k not in ["id", "password"]}
+
+    # Si viene password, actualizar hash
+    if "password" in payload and payload["password"]:
+        update_data["password_hash"] = hash_password(payload["password"])
+
+    update_data["updated_at"] = datetime.utcnow()
+
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": update_data}
+    )
+
+    updated = await db.users.find_one({"id": user_id})
+    return updated
+
+
 @router.delete("/{user_id}")
 async def delete_user(user_id: str, current=Depends(require_role(["admin"]))):
     db = get_db()

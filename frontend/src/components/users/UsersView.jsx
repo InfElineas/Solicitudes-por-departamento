@@ -37,7 +37,7 @@ const stringToColor = (str) => {
   return color;
 };
 
-function UsersView({ users, onDeleteUser }) {
+function UsersView({ users, onDeleteUser, onEditUser }) {
   return (
     <div className="grid gap-4">
       {users.map((u) => (
@@ -45,7 +45,10 @@ function UsersView({ users, onDeleteUser }) {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <Avatar className="w-20 h-20" name={u.full_name} />
+                <Avatar
+                  className="w-20 h-20"
+                  name={u.full_name || u.username}
+                />
                 <div>
                   <h3 className="font-semibold">{u.full_name}</h3>
                   <p
@@ -53,15 +56,15 @@ function UsersView({ users, onDeleteUser }) {
                       u.role === "admin"
                         ? "default"
                         : u.role === "support"
-                          ? "secondary"
-                          : "outline"
+                        ? "secondary"
+                        : "outline"
                     }
                   >
                     {u.role === "admin"
                       ? "Administrador"
                       : u.role === "support"
-                        ? "Soporte"
-                        : "Empleado"}
+                      ? "Soporte"
+                      : "Empleado"}
                   </p>
                   <p className="text-sm text-gray-500">@{u.username}</p>
                   <p className="text-sm text-gray-500">
@@ -71,13 +74,22 @@ function UsersView({ users, onDeleteUser }) {
               </div>
 
               <div className="flex flex-col items-end space-y-2">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => onDeleteUser(u.id)}
-                >
-                  Eliminar
-                </Button>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onEditUser && onEditUser(u)}
+                  >
+                    Editar
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => onDeleteUser(u.id)}
+                  >
+                    Eliminar
+                  </Button>
+                </div>
               </div>
             </div>
           </CardContent>

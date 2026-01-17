@@ -496,6 +496,44 @@ async def create_user(user: UserCreate, current_user: User = Depends(require_rol
     await db.users.insert_one(user_doc)
     return new_user
 
+from pydantic import BaseModel
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
+    role: Optional[str] = None
+
+
+@api_router.patch("/users/{user_id}", response_model=User)
+async def update_user(
+    user_id: str,
+    payload: UserUpdate,
+    current_user: User = Depends(require_role(["admin"]))
+):
+    user_doc = await db.users.find_one({"id": user_id})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    update_data = payload.dict(exclude_unset=True)
+    if not update_data:
+        return User(**user_doc)
+
+    # Evitar username duplicado
+    if "username" in update_data:
+        exists = await db.users.find_one({
+            "username": update_data["username"],
+            "id": {"$ne": user_id}
+        })
+        if exists:
+            raise HTTPException(status_code=400, detail="Username ya existe")
+
+    await db.users.update_one({"id": user_id}, {"$set": update_data})
+    updated = await db.users.find_one({"id": user_id})
+    return User(**updated)
+
+
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(get_current_user)):
     users = await db.users.find().to_list(1000)
