@@ -127,7 +127,7 @@ api.interceptors.response.use(
       notifyAuthExpired();
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 /* ===========================
@@ -141,7 +141,7 @@ function App() {
 
   // pestaña activa (persistente)
   const [activeTab, setActiveTab] = useState(
-    () => localStorage.getItem("activeTab") || "requests"
+    () => localStorage.getItem("activeTab") || "requests",
   );
   useEffect(() => {
     localStorage.setItem("activeTab", activeTab);
@@ -264,14 +264,14 @@ function App() {
   }, [filters]);
 
   const [page, setPage] = useState(
-    () => Number(localStorage.getItem("page")) || 1
+    () => Number(localStorage.getItem("page")) || 1,
   );
   useEffect(() => {
     localStorage.setItem("page", String(page));
   }, [page]);
 
   const [pageSize, setPageSize] = useState(
-    () => Number(localStorage.getItem("pageSize")) || 10
+    () => Number(localStorage.getItem("pageSize")) || 10,
   );
   useEffect(() => {
     localStorage.setItem("pageSize", String(pageSize));
@@ -299,7 +299,7 @@ function App() {
   // analytics
   const [analytics, setAnalytics] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState(
-    () => localStorage.getItem("analyticsPeriod") || "all"
+    () => localStorage.getItem("analyticsPeriod") || "all",
   );
   const [analyticsFilters, setAnalyticsFilters] = useState(() => {
     try {
@@ -364,7 +364,7 @@ function App() {
   useEffect(() => {
     const onExpired = (ev) =>
       logout(
-        ev?.detail?.message || "Tu sesión expiró. Inicia sesión nuevamente."
+        ev?.detail?.message || "Tu sesión expiró. Inicia sesión nuevamente.",
       );
     if (typeof window !== "undefined") {
       window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
@@ -501,7 +501,7 @@ function App() {
       const { data } = await api.post(
         "/auth/login",
         { username: loginData.username, password: loginData.password },
-        { headers: { "Content-Type": "application/json" } }
+        { headers: { "Content-Type": "application/json" } },
       );
       const { access_token } = data;
       localStorage.setItem("token", access_token);
@@ -646,10 +646,11 @@ function App() {
       await api.delete(`/users/${userId}`);
       await Swal.fire("Eliminado", "Usuario eliminado", "success");
       fetchUsers();
+      await fetchCurrentUser();
     } catch (e) {
       console.error(e);
       toast.error(
-        e?.response?.data?.detail || "No se pudo eliminar el usuario"
+        e?.response?.data?.detail || "No se pudo eliminar el usuario",
       );
     }
   };
@@ -674,7 +675,7 @@ function App() {
     requestId,
     assigned_to,
     estimated_hours,
-    estimated_due
+    estimated_due,
   ) => {
     try {
       const payload = {
@@ -931,62 +932,99 @@ function App() {
     setEditUserDialog(true);
   };
 
-const updateUser = async (e) => {
-  try {
-    e?.preventDefault();
-  } catch (err) {
-    console.error(err);
-  }
+  // ---- Función para actualizar cualquier usuario (admin) ----
+  const updateUser = async (userId, payload) => {
+    try {
+      // Si el usuario está editando su propio perfil -> usa /users/me
+      if (user && userId === user.id) {
+        await api.patch("/users/me", payload);
+        // refresca el current user (para que el header muestre el nuevo nombre)
+        await fetchCurrentUser();
+      } else {
+        // admin-edit u otro caso -> endpoint clásico
+        await api.patch(`/users/${userId}`, payload);
+        await fetchUsers?.();
+        // si el admin edita al usuario que está logueado, refresca también
+        if (user && userId === user.id) {
+          await fetchCurrentUser();
+        }
+      }
 
-  if (!editUser) return;
-
-  const payload = {
-    username: editUser.username,
-    full_name: editUser.full_name,
-    department: editUser.department,
-    position: editUser.position,
-    role: editUser.role,
+      if (window.Swal) {
+        window.Swal.fire({
+          icon: "success",
+          title: "Perfil actualizado",
+          text: "Tus cambios se guardaron correctamente",
+          timer: 1600,
+          showConfirmButton: false,
+        });
+      } else {
+        toast.success("Perfil actualizado");
+      }
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Error al actualizar";
+      if (window.Swal) {
+        window.Swal.fire({ icon: "error", title: "Error", text: msg });
+      } else {
+        toast.error(msg);
+      }
+      throw error;
+    }
   };
-  if (editUser.password && editUser.password.trim() !== "") {
-    payload.password = editUser.password;
-  }
 
-  try {
-    await api.patch(`/users/${editUser.id}`, payload);
+  // ---- Actualizar perfil del usuario logueado (/users/me) ----
+  const updateProfile = async (payload) => {
+    try {
+      // Endpoint especial para perfil — el backend debe usar current_user del token
+      const { data } = await api.patch("/users/me", payload);
 
-    setEditUserDialog(false);
-    setEditUser(null);
-    await fetchUsers();
+      // Actualiza el state local del usuario inmediatamente para ver cambios en header
+      setUser(data);
 
-    await Swal.fire({
-      title: "Guardado",
-      html: `Cambios guardados para <strong>@${payload.username}</strong>.`,
-      icon: "success",
-      confirmButtonText: "Aceptar",
-    });
-  } catch (error) {
-    console.error("Error updating user:", error);
-    const resp = error?.response;
-    const msg =
-      resp?.data?.detail ||
-      resp?.data?.message ||
-      (resp ? JSON.stringify(resp.data) : error.message || "Error desconocido");
+      // Si eres admin, refresca el listado de usuarios (por si cambias nombre)
+      if (user?.role === "admin") {
+        await fetchUsers();
+      }
 
-    await Swal.fire({
-      title: "Error",
-      html: `<div>${msg}</div>`,
-      icon: "error",
-      confirmButtonText: "Cerrar",
-    });
-    toast.error(msg);
-  }
-};
+      if (window.Swal) {
+        window.Swal.fire({
+          icon: "success",
+          title: "Perfil actualizado",
+          timer: 1200,
+          showConfirmButton: false,
+        });
+      } else {
+        toast.success("Perfil actualizado");
+      }
 
+      return data;
+    } catch (error) {
+      console.error("Error updating profile (me):", error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Error al actualizar perfil";
+      if (window.Swal) {
+        window.Swal.fire({ icon: "error", title: "Error", text: msg });
+      } else {
+        toast.error(msg);
+      }
+      throw error;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <HeaderBar user={user} onLogout={logout} />
+      <HeaderBar
+        user={user}
+        onLogout={logout}
+        onUpdateProfile={updateProfile}
+      />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
@@ -1226,7 +1264,25 @@ const updateUser = async (e) => {
             </DialogDescription>
           </DialogHeader>
           {editUser ? (
-            <form onSubmit={updateUser} className="space-y-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+
+                const payload = {
+                  full_name: editUser.full_name,
+                };
+
+                if (editUser.password && editUser.password.trim() !== "") {
+                  payload.password = editUser.password;
+                }
+
+                updateUser(editUser.id, payload).then(() => {
+                  setEditUserDialog(false);
+                  setEditUser(null);
+                });
+              }}
+              className="space-y-4"
+            >
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="edit_username">Usuario</Label>
@@ -1400,7 +1456,7 @@ const updateUser = async (e) => {
                 classifyRequest(
                   classifyDialogFor,
                   classifyData.level,
-                  classifyData.priority
+                  classifyData.priority,
                 )
               }
             >
@@ -1419,7 +1475,7 @@ const updateUser = async (e) => {
             assignDialogFor,
             assignData.assigned_to,
             assignData.estimated_hours,
-            assignData.estimated_due
+            assignData.estimated_due,
           )
         }
         assignData={assignData}
@@ -1484,7 +1540,7 @@ const updateUser = async (e) => {
                 submitFeedback(
                   feedbackDialogFor,
                   feedbackData.rating,
-                  feedbackData.comment
+                  feedbackData.comment,
                 )
               }
             >

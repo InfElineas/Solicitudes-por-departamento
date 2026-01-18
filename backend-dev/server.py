@@ -506,6 +506,41 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
 
 
+class UserProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    password: Optional[str] = None
+
+
+@api_router.patch("/users/me", response_model=User)
+async def update_my_profile(
+    payload: UserProfileUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    update_data = {}
+
+    if payload.full_name is not None:
+        update_data["full_name"] = payload.full_name
+
+    if payload.password is not None and payload.password.strip():
+        update_data["password_hash"] = get_password_hash(payload.password)
+
+    if not update_data:
+        return current_user
+
+    await db.users.update_one(
+        {"id": current_user.id},
+        {"$set": update_data}
+    )
+
+    updated = await db.users.find_one({"id": current_user.id})
+    return User(**updated)
+
+
+@api_router.get("/users", response_model=List[User])
+async def get_users(current_user: User = Depends(get_current_user)):
+    users = await db.users.find().to_list(1000)
+    return [User(**user) for user in users]
+
 @api_router.patch("/users/{user_id}", response_model=User)
 async def update_user(
     user_id: str,
@@ -532,12 +567,6 @@ async def update_user(
     await db.users.update_one({"id": user_id}, {"$set": update_data})
     updated = await db.users.find_one({"id": user_id})
     return User(**updated)
-
-
-@api_router.get("/users", response_model=List[User])
-async def get_users(current_user: User = Depends(get_current_user)):
-    users = await db.users.find().to_list(1000)
-    return [User(**user) for user in users]
 
 # ---- Departments ----
 @api_router.get("/departments", response_model=List[Department])
