@@ -908,7 +908,7 @@ async def update_request_generic(
 async def add_worklog(
     request_id: str,
     payload: WorklogCreate,
-    current_user: User = Depends(require_role(["support", "admin"]))
+    current_user: User = Depends(get_current_user)
 ):
     # valida existencia
     if not await db.requests.find_one({"id": request_id}):
@@ -971,7 +971,7 @@ class PaginatedTrash(BaseModel):
 
 @api_router.get("/requests/trash", response_model=PaginatedTrash)
 async def list_trash(
-    current_user: User = Depends(require_role(["admin"])),
+    current_user: User = Depends(require_role(["support", "admin"])),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=settings.max_page_size),
     q: Optional[str] = Query(None),
@@ -1147,8 +1147,6 @@ async def _summary_payload(period: Literal["all", "daily", "weekly", "monthly"])
         {"$match": {"assigned_to": {"$ne": None}, "status": "En revisión"}},
         {"$group": {"_id": "$assigned_to", "in_review": {"$sum": 1}}}
     ]).to_list(1000)
-
-    # "Pendiente", "En progreso", "En revisión", "Finalizada"
 
     by_id: Dict[str, Dict[str, Any]] = {}
     for coll, key in [(assigned,"assigned_total"), (pending,"pending_now"), (in_progress,"in_progress"), (attended,"attended_period"), (in_review, "in_review")]:
@@ -1372,14 +1370,14 @@ async def backlog_trend(
 @api_router.get("/reports/summary")
 async def reports_summary(
     period: Literal["all", "daily", "weekly", "monthly"] = Query("all"),
-    current_user: User = Depends(require_role(["support", "admin"]))
+    current_user: User = Depends(get_current_user)
 ):
     return await _summary_payload(period)
 
 @api_router.get("/analytics/dashboard")
 async def analytics_dashboard(
     period: Literal["day", "week", "month"] = Query("month"),
-    current_user: User = Depends(require_role(["support", "admin"]))
+    current_user: User = Depends(get_current_user)
 ):
     map_period = {"day": "daily", "week": "weekly", "month": "monthly"}[period]
     return await _summary_payload(map_period)

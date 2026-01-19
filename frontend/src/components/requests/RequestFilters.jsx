@@ -169,9 +169,9 @@ const RequestFilters = ({
           <SelectTrigger>
             <SelectValue
               placeholder={
-                user.role === "support" || user.role === "admin"
+                (user.role === "support" || user.role === "admin"
                   ? user.id
-                  : "Todos" ?? "Todos"
+                  : "Todos") ?? "Todos"
               }
             />
           </SelectTrigger>
@@ -196,9 +196,9 @@ const RequestFilters = ({
           <SelectTrigger>
             <SelectValue
               placeholder={
-                user.role === "support" || user.role === "admin"
+                (user.role === "support" || user.role === "admin"
                   ? "Todos"
-                  : user.id ?? "Todos"
+                  : user.id) ?? "Todos"
               }
             />
           </SelectTrigger>

@@ -25,7 +25,7 @@ const NavigationTabs = ({ user }) => {
             </TabsTrigger>
           )}
 
-          {user?.role === "admin" && (
+          {(user?.role === "support" || user?.role === "admin") && (
             <TabsTrigger
               value="trash"
               className="flex items-center gap-2 whitespace-nowrap"
@@ -35,7 +35,7 @@ const NavigationTabs = ({ user }) => {
             </TabsTrigger>
           )}
 
-          {user?.role === "admin" && (
+          {(user?.role === "support" || user?.role === "admin") && (
             <TabsTrigger
               value="users"
               className="flex items-center gap-2 whitespace-nowrap"
@@ -45,7 +45,7 @@ const NavigationTabs = ({ user }) => {
             </TabsTrigger>
           )}
 
-          {user?.role === "admin" && (
+          {(user?.role === "support" || user?.role === "admin") && (
             <TabsTrigger
               value="departments"
               className="flex items-center gap-2 whitespace-nowrap"

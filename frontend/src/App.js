@@ -936,13 +936,12 @@ function App() {
                 analyticsFilters={analyticsFilters}
                 setAnalyticsFilters={setAnalyticsFilters}
                 users={users}
-                departments={departments}
               />
             </TabsContent>
           )}
 
           {/* Users Tab (Admin only) */}
-          {user?.role === "admin" && (
+          {(user?.role === "support" || user?.role === "admin") && (
             <TabsContent value="users" className="space-y-4">
               <div className="flex justify-between items-center">
                 <h2 className="text-2xl font-bold text-gray-900">
@@ -1081,18 +1080,17 @@ function App() {
           )}
 
           {/* Departments Tab (Admin only) */}
-          {user?.role === "admin" && (
+          {(user?.role === "support" || user?.role === "admin") && (
             <TabsContent value="departments" className="space-y-4">
               <DepartmentsView
                 departments={departments}
                 users={users}
-                requests={requests}
               />
             </TabsContent>
           )}
 
           {/* Trash Tab(Admin only) */}
-          {user?.role === "admin" && (
+          {(user?.role === "support" || user?.role === "admin") && (
             <TabsContent value="trash" className="space-y-4">
               <h2 className="text-2xl font-bold text-gray-900">Papelera</h2>
               <TrashView api={api} />

@@ -33,7 +33,6 @@ function AnalyticsView({
   analyticsFilters,
   setAnalyticsFilters,
   users = [],
-  departments = [],
 }) {
   const { filtered, global, ranking } = useProductivity(
     analytics,
