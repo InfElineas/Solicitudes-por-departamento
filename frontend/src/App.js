@@ -1,3 +1,4 @@
+// src/App.js
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 import axios from "axios";
@@ -61,6 +62,9 @@ import {
   CardHeader,
   CardTitle,
 } from "./components/ui/card";
+
+import Swal from "sweetalert2";
+import "sweetalert2/dist/sweetalert2.css";
 
 /* ===========================
    Axios client + interceptors
@@ -290,6 +294,10 @@ function App() {
 
   // departments
   const [departments, setDepartments] = useState(null);
+
+  // ---- NUEVOS estados para editar usuario ----
+  const [editUserDialog, setEditUserDialog] = useState(false);
+  const [editUser, setEditUser] = useState(null);
 
   // analytics
   const [analytics, setAnalytics] = useState(null);
@@ -571,28 +579,39 @@ function App() {
     }
   };
 
-  // Eliminar solicitud
+  // Eliminar solicitud (ahora con SweetAlert)
   const deleteRequest = async (requestId) => {
-    if (!window.confirm("¿Mover la solicitud a la papelera por 14 días?"))
-      return;
+    const result = await Swal.fire({
+      title: "Mover a papelera",
+      text: "¿Mover la solicitud a la papelera por 14 días?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Sí, mover",
+      cancelButtonText: "Cancelar",
+    });
+    if (!result.isConfirmed) return;
     try {
       await api.delete(`/requests/${requestId}`);
-      toast.success("Solicitud enviada a papelera");
+      await Swal.fire("En papelera", "Solicitud enviada a papelera", "success");
       fetchRequests();
     } catch (e) {
+      console.error(e);
       toast.error(e?.response?.data?.detail || "No se pudo eliminar");
     }
   };
 
-  // Crear usuario (admin)
+  // Crear usuario (admin) -> ahora pide confirmación con SweetAlert
   const createUser = async (e) => {
     try {
       e.preventDefault();
     } catch (error) {
       console.error(error);
     }
+
     try {
       await api.post("/users", newUser);
+
+      // reset UI
       setNewUser({
         username: "",
         password: "",
@@ -602,22 +621,52 @@ function App() {
         role: "employee",
       });
       setUserDialog(false);
-      fetchUsers();
-      toast.success("Usuario creado exitosamente");
+      await fetchUsers();
+
+      // SweetAlert after success
+      await Swal.fire({
+        title: "Creado",
+        html: `Usuario <strong>@${newUser.username}</strong> creado exitosamente.`,
+        icon: "success",
+        confirmButtonText: "Aceptar",
+      });
     } catch (error) {
       console.error("Error creating user:", error);
-      toast.error(error?.response?.data?.detail || "Error al crear usuario");
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        "Error al crear usuario";
+      // SweetAlert for failure
+      await Swal.fire({
+        title: "Error",
+        html: `<div>${message}</div>`,
+        icon: "error",
+        confirmButtonText: "Cerrar",
+      });
+
+      // keep toast-based error as secondary feedback (optional)
+      toast.error(message);
     }
   };
 
-  //Eliminar usuario(admin)
+  //Eliminar usuario(admin) -> SweetAlert confirm
   const deleteUser = async (userId) => {
-    if (!window.confirm("¿Eliminar este usuario?")) return;
+    const result = await Swal.fire({
+      title: "Eliminar usuario",
+      text: "¿Eliminar este usuario?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Eliminar",
+      cancelButtonText: "Cancelar",
+    });
+    if (!result.isConfirmed) return;
     try {
       await api.delete(`/users/${userId}`);
-      toast.success("Usuario eliminado");
+      await Swal.fire("Eliminado", "Usuario eliminado", "success");
       fetchUsers();
+      await fetchCurrentUser();
     } catch (e) {
+      console.error(e);
       toast.error(
         e?.response?.data?.detail || "No se pudo eliminar el usuario",
       );
@@ -894,10 +943,106 @@ function App() {
     );
   }
 
+  // ---- Funciones para editar usuario ----
+  const openEditUser = (userObj) => {
+    // Clonar para evitar mutaciones directas del array users hasta guardar
+    setEditUser({ ...userObj });
+    setEditUserDialog(true);
+  };
+
+  // ---- Función para actualizar cualquier usuario (admin) ----
+  const updateUser = async (userId, payload) => {
+    try {
+      // Si el usuario está editando su propio perfil -> usa /users/me
+      if (user && userId === user.id) {
+        await api.patch("/users/me", payload);
+        // refresca el current user (para que el header muestre el nuevo nombre)
+        await fetchCurrentUser();
+      } else {
+        // admin-edit u otro caso -> endpoint clásico
+        await api.patch(`/users/${userId}`, payload);
+        await fetchUsers?.();
+        // si el admin edita al usuario que está logueado, refresca también
+        if (user && userId === user.id) {
+          await fetchCurrentUser();
+        }
+      }
+
+      if (window.Swal) {
+        window.Swal.fire({
+          icon: "success",
+          title: "Perfil actualizado",
+          text: "Tus cambios se guardaron correctamente",
+          timer: 1600,
+          showConfirmButton: false,
+        });
+      } else {
+        toast.success("Perfil actualizado");
+      }
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Error al actualizar";
+      if (window.Swal) {
+        window.Swal.fire({ icon: "error", title: "Error", text: msg });
+      } else {
+        toast.error(msg);
+      }
+      throw error;
+    }
+  };
+
+  // ---- Actualizar perfil del usuario logueado (/users/me) ----
+  const updateProfile = async (payload) => {
+    try {
+      // Endpoint especial para perfil — el backend debe usar current_user del token
+      const { data } = await api.patch("/users/me", payload);
+
+      // Actualiza el state local del usuario inmediatamente para ver cambios en header
+      setUser(data);
+
+      // Si eres admin, refresca el listado de usuarios (por si cambias nombre)
+      if (user?.role === "admin") {
+        await fetchUsers();
+      }
+
+      if (window.Swal) {
+        window.Swal.fire({
+          icon: "success",
+          title: "Perfil actualizado",
+          timer: 1200,
+          showConfirmButton: false,
+        });
+      } else {
+        toast.success("Perfil actualizado");
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error updating profile (me):", error);
+      const msg =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Error al actualizar perfil";
+      if (window.Swal) {
+        window.Swal.fire({ icon: "error", title: "Error", text: msg });
+      } else {
+        toast.error(msg);
+      }
+      throw error;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <HeaderBar user={user} onLogout={logout} />
+      <HeaderBar
+        user={user}
+        onLogout={logout}
+        onUpdateProfile={updateProfile}
+      />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
@@ -1093,7 +1238,12 @@ function App() {
                 </Dialog>
               </div>
 
-              <UsersView users={users} onDeleteUser={deleteUser} />
+              {/* Pasamos la nueva prop onEditUser */}
+              <UsersView
+                users={users}
+                onDeleteUser={deleteUser}
+                onEditUser={openEditUser}
+              />
             </TabsContent>
           )}
 
@@ -1113,6 +1263,147 @@ function App() {
           )}
         </Tabs>
       </main>
+
+      {/* === Dialog: Editar Usuario (nuevo) === */}
+      <Dialog
+        open={editUserDialog}
+        onOpenChange={(open) => !open && setEditUserDialog(false)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Usuario</DialogTitle>
+            <DialogDescription>
+              Modifica los campos y guarda los cambios.
+            </DialogDescription>
+          </DialogHeader>
+          {editUser ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+
+                const payload = {
+                  full_name: editUser.full_name,
+                };
+
+                if (editUser.password && editUser.password.trim() !== "") {
+                  payload.password = editUser.password;
+                }
+
+                updateUser(editUser.id, payload).then(() => {
+                  setEditUserDialog(false);
+                  setEditUser(null);
+                });
+              }}
+              className="space-y-4"
+            >
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit_username">Usuario</Label>
+                  <Input
+                    id="edit_username"
+                    value={editUser.username}
+                    onChange={(e) =>
+                      setEditUser({ ...editUser, username: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_password">Contraseña (opcional)</Label>
+                  <Input
+                    id="edit_password"
+                    type="password"
+                    placeholder="Dejar en blanco para mantener"
+                    value={editUser.password || ""}
+                    onChange={(e) =>
+                      setEditUser({ ...editUser, password: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_full_name">Nombre Completo</Label>
+                <Input
+                  id="edit_full_name"
+                  value={editUser.full_name || ""}
+                  onChange={(e) =>
+                    setEditUser({ ...editUser, full_name: e.target.value })
+                  }
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Departamento</Label>
+                  <Select
+                    value={editUser.department || ""}
+                    onValueChange={(value) =>
+                      setEditUser({ ...editUser, department: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {departments.map((dept) => (
+                        <SelectItem key={dept} value={dept}>
+                          {dept}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Puesto</Label>
+                  <Select
+                    value={editUser.position || "Especialista"}
+                    onValueChange={(value) =>
+                      setEditUser({ ...editUser, position: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Jefe de departamento">
+                        Jefe de departamento
+                      </SelectItem>
+                      <SelectItem value="Especialista">Especialista</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Rol</Label>
+                <Select
+                  value={editUser.role || "employee"}
+                  onValueChange={(value) =>
+                    setEditUser({ ...editUser, role: value })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employee">Empleado</SelectItem>
+                    <SelectItem value="support">Soporte Técnico</SelectItem>
+                    <SelectItem value="admin">Administrador</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditUserDialog(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit">Guardar cambios</Button>
+              </div>
+            </form>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       {/* === Dialog: Clasificar (admin) === */}
       <Dialog
