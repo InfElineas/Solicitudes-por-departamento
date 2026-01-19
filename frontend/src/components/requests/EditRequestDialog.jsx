@@ -175,8 +175,8 @@ const EditRequestDialog = ({
                   </SelectTrigger>
                   <SelectContent>
                     {departmentOptions.map((o) => (
-                      <SelectItem key={o} value={o}>
-                        {o}
+                      <SelectItem key={o.id} value={o.name}>
+                        {o.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

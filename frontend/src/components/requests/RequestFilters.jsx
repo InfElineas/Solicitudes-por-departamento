@@ -89,9 +89,9 @@ const RequestFilters = ({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
-            {departments.map((d) => (
-              <SelectItem key={d} value={d}>
-                {d}
+            {departments?.map((d) => (
+              <SelectItem key={d.id} value={d.name}>
+                {d.name}
               </SelectItem>
             ))}
           </SelectContent>

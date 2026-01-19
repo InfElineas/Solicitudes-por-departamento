@@ -288,6 +288,9 @@ function App() {
     role: "employee",
   });
 
+  // departments
+  const [departments, setDepartments] = useState(null);
+
   // analytics
   const [analytics, setAnalytics] = useState(null);
   const [analyticsPeriod, setAnalyticsPeriod] = useState(
@@ -335,7 +338,6 @@ function App() {
     id: null,
     link: "",
   });
-  const departments = VALID.department.filter((d) => d !== "all");
 
   const logout = useCallback((message) => {
     setToken(null);
@@ -387,6 +389,11 @@ function App() {
     if (!user) return;
     if (user.role === "support" || user.role === "admin") fetchAnalytics();
   }, [user, analyticsPeriod]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === "support" || user.role === "admin") fetchDepartments();
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -479,6 +486,17 @@ function App() {
       console.error("Error fetching analytics:", error);
       if (isUnauthorized(error)) return;
       toast.error("Error al cargar análisis");
+    }
+  };
+
+  const fetchDepartments = async () => {
+    try {
+      const { data } = await api.get("/departments");
+      setDepartments(data);
+    } catch (error) {
+      console.error("Error fetching departments:", error);
+      if (isUnauthorized(error)) return;
+      toast.error("Error al cargar departamentos");
     }
   };
 
@@ -1017,9 +1035,9 @@ function App() {
                               <SelectValue placeholder="Seleccionar..." />
                             </SelectTrigger>
                             <SelectContent>
-                              {departments.map((dept) => (
-                                <SelectItem key={dept} value={dept}>
-                                  {dept}
+                              {departments?.map((dept) => (
+                                <SelectItem key={dept.id} value={dept.name}>
+                                  {dept.name}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1082,10 +1100,7 @@ function App() {
           {/* Departments Tab (Admin only) */}
           {(user?.role === "support" || user?.role === "admin") && (
             <TabsContent value="departments" className="space-y-4">
-              <DepartmentsView
-                departments={departments}
-                users={users}
-              />
+              <DepartmentsView departments={departments} users={users} />
             </TabsContent>
           )}
 

@@ -502,10 +502,61 @@ async def get_users(current_user: User = Depends(get_current_user)):
     return [User(**user) for user in users]
 
 # ---- Departments ----
-@api_router.get("/departments", response_model=List[Department])
+@api_router.get("/departments")
 async def get_departments(current_user: User = Depends(get_current_user)):
     departments = await db.departments.find().to_list(1000)
-    return [Department(**dept) for dept in departments]
+    dept_list = [Department(**dept) for dept in departments]
+    
+    # Si es support o admin, agregar estadísticas de solicitudes
+    if current_user.role in ("support", "admin"):
+        dept_names = [d.name for d in dept_list]
+        
+        # Total de solicitudes por departamento
+        total_stats = await db.requests.aggregate([
+            {"$match": {"department": {"$in": dept_names}}},
+            {"$group": {"_id": "$department", "total": {"$sum": 1}}},
+        ]).to_list(1000)
+        
+        # Solicitudes abiertas (Pendiente, En progreso, En revisión)
+        open_stats = await db.requests.aggregate([
+            {"$match": {"department": {"$in": dept_names}, "status": {"$in": ["Pendiente", "En progreso", "En revisión"]}}},
+            {"$group": {"_id": "$department", "open": {"$sum": 1}}},
+        ]).to_list(1000)
+        
+        # Solicitudes completadas (Finalizada o Rechazada)
+        completed_stats = await db.requests.aggregate([
+            {"$match": {"department": {"$in": dept_names}, "status": {"$in": ["Finalizada", "Rechazada"]}}},
+            {"$group": {"_id": "$department", "completed": {"$sum": 1}}},
+        ]).to_list(1000)
+
+        # Calcular tiempo promedio de resolución por departamento
+        avg_resolution_stats = await db.requests.aggregate([
+            {"$match": {"department": {"$in": dept_names}}},
+            {"$group": {
+                "_id": "$department",
+                "avg_resolution_time": {"$avg": {"$divide": [{"$subtract": ["$completion_date", "$requested_at"]}, 1000 * 60 * 60]}}
+            }}
+        ]).to_list(1000)
+
+        # Crear mapas para búsqueda rápida
+        total_map = {item["_id"]: item["total"] for item in total_stats}
+        open_map = {item["_id"]: item["open"] for item in open_stats}
+        completed_map = {item["_id"]: item["completed"] for item in completed_stats}
+        avg_resolution_map = {item["_id"]: round(item["avg_resolution_time"], 2) for item in avg_resolution_stats}
+        
+        # Construir respuesta con estadísticas
+        result = []
+        for dept in dept_list:
+            dept_dict = dept.dict()
+            dept_dict["total"] = total_map.get(dept.name, 0)
+            dept_dict["open"] = open_map.get(dept.name, 0)
+            dept_dict["completed"] = completed_map.get(dept.name, 0)
+            dept_dict["avg_resolution_time"] = avg_resolution_map.get(dept.name, None)
+            result.append(dept_dict)
+        
+        return result
+    
+    return dept_list
 
 # ---- Requests ----
 @api_router.post("/requests", response_model=Request)
