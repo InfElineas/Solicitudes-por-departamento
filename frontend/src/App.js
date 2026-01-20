@@ -1098,7 +1098,7 @@ function App() {
                 setAnalyticsPeriod={setAnalyticsPeriod}
                 analyticsFilters={analyticsFilters}
                 setAnalyticsFilters={setAnalyticsFilters}
-                users={users}
+                users={users.filter((u) => u.role === "support")}
               />
             </TabsContent>
           )}
