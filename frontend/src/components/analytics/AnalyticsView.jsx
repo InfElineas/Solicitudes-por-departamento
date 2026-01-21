@@ -205,7 +205,7 @@ function AnalyticsView({
                       {filtered.map((row) => (
                         <tr key={row.user_id}>
                           <td className="py-2 pr-2 whitespace-nowrap">
-                            {row.name || "Sin asignación"}
+                            {row.name?.name || row.name || "Sin asignación"}
                           </td>
                           <td className="py-2 pr-2 text-right">
                             {row.assigned ?? 0}
@@ -249,10 +249,9 @@ function AnalyticsView({
                   filtered.map((row) => (
                     <BarItem
                       key={row.user_id}
-                      label={row.name}
+                      label={row.name?.name || row.name || "Sin asignación"}
                       value={row.finished}
                       max={maxFinished}
-                      colorClass="bg-green-500"
                     />
                   ))
                 ) : (
@@ -322,7 +321,7 @@ function AnalyticsView({
                             #{row.position}
                           </td>
                           <td className="py-2 pr-2 whitespace-nowrap">
-                            {row.name || "Sin asignación"}
+                            {row.name?.name || row.name || "Sin asignación"}
                           </td>
                           <td className="py-2 pr-2 text-right">
                             {row.finished ?? 0}
@@ -396,8 +395,8 @@ const StackedBar = ({ row, max = 0 }) => {
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-gray-600">
-        <span className="truncate pr-2" title={row.name}>
-          {row.name}
+        <span className="truncate pr-2" title={row.name?.name || row.name}>
+          {row.name?.name || row.name || "Sin asignación"}
         </span>
         <span className="font-medium text-gray-900">{total}</span>
       </div>

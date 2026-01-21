@@ -461,7 +461,17 @@ function App() {
   const fetchUsers = async () => {
     try {
       const { data } = await api.get("/users");
-      setUsers(data);
+      const raw = data;
+      const normalized = raw.map((u) => ({
+        ...u,
+        department:
+          u.department && typeof u.department === "object"
+            ? u.department.name ||
+              u.department.id ||
+              JSON.stringify(u.department)
+            : u.department || "",
+      }));
+      setUsers(normalized);
     } catch (error) {
       console.error("Error fetching users:", error);
       if (isUnauthorized(error)) return;
@@ -945,8 +955,37 @@ function App() {
 
   // ---- Funciones para editar usuario ----
   const openEditUser = (userObj) => {
-    // Clonar para evitar mutaciones directas del array users hasta guardar
-    setEditUser({ ...userObj });
+    if (!userObj) return;
+
+    // ✅ Validación dura: debe tener username o role para ser usuario
+    if (!userObj.username && !userObj.role) {
+      console.error("openEditUser recibió objeto que NO es usuario:", userObj);
+      return; // ⛔ cortar aquí
+    }
+
+    const normalize = (val) => {
+      if (val === undefined || val === null) return "";
+      if (typeof val === "string" || typeof val === "number")
+        return String(val);
+      if (typeof val === "object") {
+        return val.name || val.id || "";
+      }
+      return String(val);
+    };
+
+    const departmentValue = normalize(userObj.department);
+    const positionValue = normalize(userObj.position);
+
+    setEditUser({
+      id: userObj.id || "",
+      username: userObj.username || "",
+      full_name: userObj.full_name || "",
+      role: userObj.role || "employee",
+      department: departmentValue,
+      position: positionValue,
+      password: "",
+    });
+
     setEditUserDialog(true);
   };
 
@@ -1346,8 +1385,8 @@ function App() {
                     </SelectTrigger>
                     <SelectContent>
                       {departments.map((dept) => (
-                        <SelectItem key={dept} value={dept}>
-                          {dept}
+                        <SelectItem key={dept.id} value={dept.name}>
+                          {dept.name}
                         </SelectItem>
                       ))}
                     </SelectContent>

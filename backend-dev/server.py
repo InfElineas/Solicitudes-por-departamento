@@ -504,7 +504,7 @@ class UserUpdate(BaseModel):
     department: Optional[str] = None
     position: Optional[str] = None
     role: Optional[str] = None
-
+    password: Optional[str] = None 
 
 class UserProfileUpdate(BaseModel):
     full_name: Optional[str] = None
@@ -552,10 +552,17 @@ async def update_user(
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     update_data = payload.dict(exclude_unset=True)
+
+    # Si se envió password, reemplazar por password_hash
+    if "password" in update_data:
+        pw = update_data.pop("password")
+        if pw and pw.strip():
+            update_data["password_hash"] = get_password_hash(pw)
+
     if not update_data:
         return User(**user_doc)
 
-    # Evitar username duplicado
+    # evitar username duplicado (si se cambia)
     if "username" in update_data:
         exists = await db.users.find_one({
             "username": update_data["username"],
@@ -564,9 +571,12 @@ async def update_user(
         if exists:
             raise HTTPException(status_code=400, detail="Username ya existe")
 
+    update_data["updated_at"] = datetime.now(timezone.utc)
+
     await db.users.update_one({"id": user_id}, {"$set": update_data})
     updated = await db.users.find_one({"id": user_id})
     return User(**updated)
+
 
 # ---- Departments ----
 @api_router.get("/departments")

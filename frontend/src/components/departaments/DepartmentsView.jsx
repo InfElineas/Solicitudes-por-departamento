@@ -10,6 +10,15 @@ import {
 } from "../ui/card";
 
 function DepartmentsView({ departments, users }) {
+  console.log("DepartmentsView departments:", departments);
+  if (Array.isArray(departments)) {
+    console.log("First department:", departments[0]);
+    console.log(
+      "Type of name:",
+      typeof departments[0]?.name,
+      departments[0]?.name,
+    );
+  }
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold text-gray-900">Departamentos</h2>
@@ -17,15 +26,19 @@ function DepartmentsView({ departments, users }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {departments && Array.isArray(departments) ? (
           departments?.map((dept) => {
-            const userCount = users.filter(
-              (u) => u.department === dept.name,
-            ).length;
+            const userCount = Array.isArray(users)
+              ? users.filter((u) => u.department === dept.name).length
+              : 0;
             const requestCount = dept.total || 0;
 
             return (
-              <Card key={dept}>
+              <Card key={dept.id}>
                 <CardHeader>
-                  <CardTitle className="text-lg">{dept.name}</CardTitle>
+                  <CardTitle className="text-lg">
+                    {typeof dept.name === "string"
+                      ? dept.name
+                      : dept.name?.name || "Sin nombre"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="text-sm text-gray-600 space-y-1">
@@ -55,7 +68,7 @@ function DepartmentsView({ departments, users }) {
             {departments ? (
               departments.map((row) => (
                 <StackedBar
-                  key={row.department}
+                  key={row.id || row.name}
                   row={row}
                   max={departments.reduce(
                     (max, r) => Math.max(max, r.total),
@@ -121,7 +134,9 @@ const StackedBar = ({ row, max = 0 }) => {
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-gray-600">
         <span className="truncate pr-2" title={row.name}>
-          {row.name}
+          {typeof row.name === "string"
+            ? row.name
+            : row.name?.name || "Sin nombre"}
         </span>
         <span className="font-medium text-gray-900">{total}</span>
       </div>
@@ -162,7 +177,9 @@ const BlackBar = ({ row, max = 0 }) => {
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-gray-600">
         <span className="truncate pr-2" title={row.name}>
-          {row.name}
+          {typeof row.name === "string"
+            ? row.name
+            : row.name?.name || "Sin nombre"}
         </span>
         <span className="font-medium text-gray-900">
           {total ? total + "h" : "N/A"}
