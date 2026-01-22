@@ -37,7 +37,7 @@ const RequestFilters = ({
 
   // Opciones para "Asignado por/Asignado a": todos los usuarios disponibles
   const assignerOptions = users;
-  const assigneeOptions = users;
+  const assigneeOptions = users.filter((u) => u.role === "support");
 
   const userLabel = (u) => u?.full_name || u?.username || `Usuario ${u?.id}`;
 
@@ -166,9 +166,7 @@ const RequestFilters = ({
           <SelectTrigger>
             <SelectValue
               placeholder={
-                (user.role === "support" || user.role === "admin"
-                  ? user.id
-                  : "Todos") ?? "Todos"
+                (user.role === "support" ? user.id : "Todos") ?? "Todos"
               }
             />
           </SelectTrigger>
