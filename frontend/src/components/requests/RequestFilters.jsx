@@ -35,9 +35,6 @@ const RequestFilters = ({
     setPage(1); // reset paginación al cambiar filtros
   };
 
-  // Opciones para "Creado por": todos los usuarios
-  const creatorOptions = users;
-
   // Opciones para "Asignado por/Asignado a": todos los usuarios disponibles
   const assignerOptions = users;
   const assigneeOptions = users;
