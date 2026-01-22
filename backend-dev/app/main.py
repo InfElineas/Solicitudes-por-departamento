@@ -15,6 +15,8 @@ from server import (
     ensure_trash_indexes,
     ensure_security_indexes,
     migrate_requests_schema,
+    ensure_departments_on_startup,
+    ensure_app_config_seed,
     init_data,
 )
 
@@ -81,6 +83,8 @@ async def startup():
     await ensure_trash_indexes()
     await ensure_core_indexes()
     await migrate_requests_schema()
+    await ensure_departments_on_startup()
+    await ensure_app_config_seed()
     # opcional: solo en dev
     # await init_data()
 

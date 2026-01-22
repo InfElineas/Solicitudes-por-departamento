@@ -20,7 +20,6 @@ from app.core.db import get_db, get_client
 from app.api.routes import config as config_routes
 
 
-
 from app.core.app_config_service import get_app_config, upsert_app_config
 from app.core.app_config_schema import AppConfig, Department as ConfigDepartment, RequestOptions
 
@@ -235,6 +234,32 @@ ALLOWED_TRANSITIONS: Dict[RequestStatus, set] = {
 def ensure_transition(old: RequestStatus, new: RequestStatus):
     if new not in ALLOWED_TRANSITIONS[old]:
         raise HTTPException(status_code=400, detail=f"Transición no permitida: {old} → {new}")
+    
+# ------------------------
+# Lista canonical de departamentos
+# ------------------------
+DEPARTMENTS = [
+    {"name": "Administración", "description": "Direccion y gerencia de la empresa"},
+    {"name": "Contabilidad y Finanzas", "description": "Gestión financiera, contabilidad y control económico"},
+    {"name": "Asistencia Ejecutiva", "description": "Apoyo a dirección y coordinación ejecutiva"},
+    {"name": "Comercial", "description": "Estrategias y actividades comerciales"},
+    {"name": "Atención al Cliente", "description": "Atención, soporte y experiencia de cliente"},
+    {"name": "Facturación", "description": "Gestión de facturación y cobros"},
+    {"name": "Inventario", "description": "Control y gestión de inventarios"},
+    {"name": "Picker and Packer", "description": "Selección, empaquetado y preparación de pedidos"},
+    {"name": "Expedición", "description": "Preparación y envío de pedidos"},
+    {"name": "Estibador", "description": "Carga, descarga y manipulación de mercancías"},
+    {"name": "Punto de Ventas", "description": "Gestión y atención en punto de venta"},
+    {"name": "Calidad", "description": "Control y aseguramiento de la calidad"},
+    {"name": "Informática", "description": "Soporte tecnológico y sistemas de información"},
+    {"name": "Almacén", "description": "Gestión de almacenamiento y organización de mercancías"},
+    {"name": "Mantenimiento", "description": "Mantenimiento preventivo y correctivo"},
+    {"name": "Transporte", "description": "Logística de transporte y distribución"},
+    {"name": "Servicio", "description": "Servicios internos y soporte operativo"},
+    {"name": "Diseño", "description": "Diseño gráfico y materiales de comunicación"},
+    {"name": "Servicios Externos", "description": "Gestión de terceros y contratistas"},
+    {"name": "Extra", "description": "Categoría adicional para necesidades especiales"},
+]   
 
 # --- Normalización de docs (para datos heredados) ---
 VALID_STATUSES = {"Pendiente", "En progreso", "En revisión", "Finalizada", "Rechazada"}
@@ -248,6 +273,29 @@ STATUS_SYNONYMS = {
     "Cancelada": "Rechazada",
     "Cancelado": "Rechazada",
 }
+
+async def ensure_departments_on_startup():
+    """
+    Asegura que en la colección `departments` existan los registros canonical (DEPARTMENTS).
+    Idempotente: puede llamarse en cada arranque sin crear duplicados.
+    """
+    try:
+        inserted = 0
+        for d in DEPARTMENTS:
+            doc = {
+                "id": str(uuid.uuid4()),
+                "name": d["name"],
+                "description": d.get("description", ""),
+                "created_at": datetime.now(timezone.utc),
+            }
+            # upsert por name -> no duplica
+            res = await db.departments.update_one({"name": doc["name"]}, {"$setOnInsert": doc}, upsert=True)
+            if getattr(res, "upserted_id", None):
+                inserted += 1
+        logger.info("ensure_departments_on_startup: asegurados %d departamentos (insertados=%d)", len(DEPARTMENTS), inserted)
+    except Exception as e:
+        logger.exception("Error en ensure_departments_on_startup: %s", e)
+
 
 def _normalize_request_doc(d: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(d)
@@ -312,15 +360,33 @@ async def ensure_core_indexes():
     except Exception:
         pass
 
+
 async def ensure_app_config_seed():
-    cfg = await get_app_config(force=True)
-    if cfg.departments:
-        return  # ya hay algo
-    # semilla con tu departments_data
-    from .lo_que_sea import departments_data  # o pega el array aquí
-    depts = [Department(**d) for d in departments_data]
-    defaults = RequestOptions()  # usa defaults por ahora
-    await upsert_app_config(AppConfig(departments=depts, request_options=defaults))
+    """
+    Si el AppConfig está vacío en departamentos, lo completa usando DEPARTMENTS.
+    No sobrescribe un AppConfig que ya tenga departamentos.
+    """
+    try:
+        cfg = await get_app_config(force=True)
+        if cfg and getattr(cfg, "departments", None):
+            logger.info("ensure_app_config_seed: AppConfig ya contiene departamentos — no se modifica.")
+            return
+
+        depts = []
+        for d in DEPARTMENTS:
+            dd = {
+                "id": str(uuid.uuid4()),
+                "name": d["name"],
+                "description": d.get("description", ""),
+                "created_at": datetime.now(timezone.utc),
+            }
+            depts.append(Department(**dd))
+
+        defaults = RequestOptions()
+        await upsert_app_config(AppConfig(departments=depts, request_options=defaults))
+        logger.info("ensure_app_config_seed: AppConfig creado/actualizado con %d departamentos.", len(depts))
+    except Exception as e:
+        logger.exception("Error en ensure_app_config_seed: %s", e)
 
 # ---- Migración de datos existentes ----
 async def migrate_requests_schema() -> None:
@@ -391,7 +457,8 @@ async def init_data():
     {"code": "17", "name": "Servicio", "description": "Servicios internos y soporte operativo"},
     {"code": "18", "name": "Diseño", "description": "Diseño gráfico y materiales de comunicación"},
     {"code": "19", "name": "Servicios Externos", "description": "Gestión de terceros y contratistas"},
-]
+    {"code": "20", "name": "Extra", "description": "Categoría adicional para necesidades especiales"},
+  ]
 
     for d in departments_data:
         await db.departments.insert_one(Department(**d).dict())
