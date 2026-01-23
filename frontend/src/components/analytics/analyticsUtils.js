@@ -227,7 +227,7 @@ export const useProductivity = (analytics, filters, period = "all") => {
       analytics,
       filters.technician == "all",
     );
-    const ranking = buildRanking(filtered);
+    const ranking = buildRanking(normalized);
     return { normalized, filtered, global, ranking };
   }, [analytics, filters, period]);
 };
