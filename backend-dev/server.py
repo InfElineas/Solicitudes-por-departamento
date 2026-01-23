@@ -814,25 +814,51 @@ async def get_requests(
     total_pages = max((total + page_size - 1) // page_size, 1)
     page = min(page, total_pages)
 
-    # Use aggregation pipeline for priority sorting to map priorities to numeric values
-    if sort_field == "priority":
-        # Map: Alta=3, Media=2, Baja=1 for proper ordering
+    # Use aggregation pipeline for priority and status sorting to map to numeric values
+    if sort_field in {"priority", "status"}:
         pipeline = [
             {"$match": filt},
             {
                 "$addFields": {
-                    "priority_sort": {
-                        "$cond": [
-                            {"$eq": ["$priority", "Alta"]}, 3,
-                            {"$cond": [
-                                {"$eq": ["$priority", "Media"]}, 2,
-                                1  # Baja
-                            ]}
-                        ]
+                    "sort_value": {
+                        "$switch": {
+                            "branches": [
+                                # Priority sorting: Alta=3, Media=2, Baja=1
+                                {
+                                    "case": {"$eq": [sort_field, "priority"]},
+                                    "then": {
+                                        "$cond": [
+                                            {"$eq": ["$priority", "Alta"]}, 3,
+                                            {"$cond": [
+                                                {"$eq": ["$priority", "Media"]}, 2,
+                                                1  # Baja
+                                            ]}
+                                        ]
+                                    }
+                                },
+                                # Status sorting: Pendiente=1, En progreso=2, En revisión=3, Finalizada=4, Rechazada=5
+                                {
+                                    "case": {"$eq": [sort_field, "status"]},
+                                    "then": {
+                                        "$switch": {
+                                            "branches": [
+                                                {"case": {"$eq": ["$status", "Pendiente"]}, "then": 1},
+                                                {"case": {"$eq": ["$status", "En progreso"]}, "then": 2},
+                                                {"case": {"$eq": ["$status", "En revisión"]}, "then": 3},
+                                                {"case": {"$eq": ["$status", "Finalizada"]}, "then": 4},
+                                                {"case": {"$eq": ["$status", "Rechazada"]}, "then": 5},
+                                            ],
+                                            "default": 0
+                                        }
+                                    }
+                                },
+                            ],
+                            "default": 0
+                        }
                     }
                 }
             },
-            {"$sort": {"priority_sort": sort_dir}},
+            {"$sort": {"sort_value": sort_dir}},
             {"$skip": (page - 1) * page_size},
             {"$limit": page_size},
         ]

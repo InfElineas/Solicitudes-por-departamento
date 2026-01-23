@@ -227,8 +227,10 @@ const RequestFilters = ({
             <SelectItem value="requested_at">
               Solicitada: más antiguas
             </SelectItem>
-            <SelectItem value="status">Estado (A→Z)</SelectItem>
-            <SelectItem value="-status">Estado (Z→A)</SelectItem>
+            <SelectItem value="status">Estado (Pendiente→Rechazada)</SelectItem>
+            <SelectItem value="-status">
+              Estado (Rechazada→Pendiente)
+            </SelectItem>
             <SelectItem value="department">Departamento (A→Z)</SelectItem>
             <SelectItem value="-department">Departamento (Z→A)</SelectItem>
             <SelectItem value="-priority">Prioridad (Alta→Baja)</SelectItem>
