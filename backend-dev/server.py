@@ -59,7 +59,10 @@ limiter = Limiter(key_func=get_remote_address, enabled=True)
 #            Models
 # ============================
 RequestType = Literal["Soporte", "Mejora", "Desarrollo", "Capacitación"]
-RequestChannel = Literal["WhatsApp", "Correo", "Sistema"]
+RequestChannel = Literal["Sistema",
+  "Google Sheets",
+  "Correo Electrónico",
+  "WhatsApp",]
 RequestStatus = Literal["Pendiente", "En progreso", "En revisión", "Finalizada", "Rechazada"]
 
 OPEN_STATES = ["Pendiente", "En progreso"]
@@ -150,6 +153,12 @@ class RequestCreate(BaseModel):
     estimated_due: Optional[datetime] = None
 
 class RequestUpdate(BaseModel):
+    title: Optional[str] 
+    description: Optional[str] 
+    priority: Optional[Literal["Alta", "Media", "Baja"]]
+    type: Optional[RequestType] 
+    channel: Optional[RequestChannel] 
+    department: Optional[str] = None
     status: Optional[RequestStatus] = None
     assigned_to: Optional[str] = None
     estimated_hours: Optional[float] = None
@@ -1020,6 +1029,7 @@ async def submit_feedback(
     await db.requests.update_one({"id": request_id}, {"$set": {"feedback": fb}})
     doc = await db.requests.find_one({"id": request_id})
     return _to_request(doc)
+
 # ---- Update genérico con trazabilidad (compat) ----
 @api_router.put("/requests/{request_id}", response_model=Request)
 async def update_request_generic(
@@ -1027,6 +1037,8 @@ async def update_request_generic(
     request_update: RequestUpdate,
     current_user: User = Depends(require_role(["support", "admin"]))
 ):
+    
+    print("### UPDATE FROM server.py ###",flush=True)
     # 1) Resolución de identificador: soporta id (UUID/string) y _id (ObjectId)
     filter_: Dict[str, Any] = {"id": request_id}
     try:
@@ -1036,18 +1048,22 @@ async def update_request_generic(
     except Exception:
         pass
 
+    print("### UPDATE FROM server.py ###",flush=True)
     # 2) Documento actual (para trazabilidad y validaciones)
     doc = await db.requests.find_one(filter_)
     if not doc:
         raise HTTPException(status_code=404, detail="Request not found")
 
     current = _to_request(doc)
-
+    print("CURRENT REQUEST:", current ,flush=True)
     # 3) Datos a actualizar (solo campos provistos)
     update_data = request_update.dict(exclude_unset=True)
+    print("UPDATE_DATA:", update_data ,flush=True)
     now = datetime.now(timezone.utc)
     update_data["updated_at"] = now
 
+    print("### UPDATE FROM server.py ###",flush=True)
+    print("UPDATE_DATA:", update_data ,flush=True)
     ops: Dict[str, Any] = {"$set": update_data}
 
     # 3.1) Cambio de estado → validar transición + historizar + métricas
@@ -1066,6 +1082,8 @@ async def update_request_generic(
             by_user_name=current_user.full_name
         ).dict()
         ops["$push"] = {"state_history": state_event}
+
+        print
 
         # re-trabajo (reabierto)
         if current.status == "Finalizada" and update_data["status"] in OPEN_STATES:
@@ -1095,6 +1113,7 @@ async def update_request_generic(
     # 5) Devolver el documento ya actualizado
     #    (preferimos leer por id lógico; si no está, caemos a _id)
     updated = await db.requests.find_one({"id": current.id}) or await db.requests.find_one(filter_)
+    print("UPDATED REQUEST:", updated,flush=True)
     return _to_request(updated)
 
 

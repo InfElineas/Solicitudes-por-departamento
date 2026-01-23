@@ -1,5 +1,5 @@
-// src/components/requests/RequestsView.jsx
-import React, { useState } from "react";
+// RequestsView.jsx (parcheado — reemplaza el contenido del componente)
+import React, { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,10 @@ import EditRequestDialog from "./EditRequestDialog";
 import RequestFilters from "./RequestFilters";
 import RequestCard from "./RequestCard";
 
-// Cliente axios central (mismo baseURL e interceptores que App)
 import api from "@/api/client";
+
+import Swal from "sweetalert2";
+import "sweetalert2/dist/sweetalert2.min.css";
 
 const RequestsView = ({
   user,
@@ -64,6 +66,14 @@ const RequestsView = ({
   });
   const [saving, setSaving] = useState(false);
 
+  // Local copy of requests so podemos actualizar la lista sin recargar
+  const [localRequests, setLocalRequests] = useState(requests || []);
+
+  // Mantener sincronizado el estado local cuando el prop 'requests' cambie
+  useEffect(() => {
+    setLocalRequests(requests || []);
+  }, [requests]);
+
   // ---- Helpers de fecha ----
   const toISO = (v) => {
     if (!v || !String(v).trim()) return undefined;
@@ -94,7 +104,6 @@ const RequestsView = ({
       department: data?.department || "",
       level: data?.level ?? "",
       estimated_hours: data?.estimated_hours ?? "",
-      // si el backend trae ISO/Z, lo transformamos a datetime-local para mostrarlo en el input
       estimated_due: isoToLocalInput(data?.estimated_due) || "",
       priority: data?.priority || "",
       assigned_to: data?.assigned_to || "",
@@ -108,7 +117,6 @@ const RequestsView = ({
       if (v !== "" && v !== undefined && v !== null) out[k] = v;
     };
 
-    // strings
     put("title", src.title != null ? String(src.title).trim() : undefined);
     put(
       "description",
@@ -119,18 +127,15 @@ const RequestsView = ({
     put("department", src.department || undefined);
     put("priority", src.priority || undefined);
 
-    // numéricos
     if (src.level !== "" && src.level != null) put("level", Number(src.level));
     if (src.assigned_to !== "" && src.assigned_to != null)
       put("assigned_to", Number(src.assigned_to));
     if (src.estimated_hours !== "" && src.estimated_hours != null)
       put("estimated_hours", Number(src.estimated_hours));
 
-    // fecha ISO (si viene)
     const iso = toISO(src.estimated_due);
     if (iso) put("estimated_due", iso);
 
-    // si en el futuro editas estado desde el modal:
     if (src.status) put("status", src.status);
 
     return out;
@@ -140,35 +145,70 @@ const RequestsView = ({
   const updateRequest = async (id, payloadFromDialog) => {
     setSaving(true);
     try {
-      const upd = normalize(payloadFromDialog || editData);
+      const upd = payloadFromDialog;
+      console.log("➡️ PUT /requests/:id", { id, upd });
       if (Object.keys(upd).length === 0) {
         setEditDialogFor(null);
         return;
       }
 
-      await api.put(`/requests/${id}`, upd, {
+      // Hacemos el PUT y esperamos la respuesta (idealmente el backend devuelve el documento actualizado)
+      const res = await api.put(`/requests/${id}`, upd, {
         headers: { "Content-Type": "application/json" },
       });
 
+      // Cerrar modal
       setEditDialogFor(null);
 
-      // refresco suave si el padre expone fetchRequests; si no, recarga
+      // Si el padre expone fetchRequests lo usamos (estado fuente de la verdad)
       if (typeof fetchRequests === "function") {
         await fetchRequests();
       } else {
-        window.location.reload();
+        // Actualizamos localmente la lista con lo que nos devolvió la API (res.data)
+        // Si la API no devuelve el recurso, podríamos hacer un GET (/requests/:id) — aquí asumimos res.data es el objeto actualizado.
+        const updated = res?.data;
+        if (updated && updated.id) {
+          setLocalRequests((prev) =>
+            prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
+          );
+        } else {
+          // fallback conservador: si no hay res.data, intentar obtener el recurso actualizado
+          try {
+            const getRes = await api.get(`/requests/${id}`);
+            const fresh = getRes?.data;
+            if (fresh && fresh.id) {
+              setLocalRequests((prev) =>
+                prev.map((r) => (r.id === fresh.id ? { ...r, ...fresh } : r)),
+              );
+            }
+          } catch (e) {
+            // No hacemos reload; solo logueamos y seguimos
+            console.warn("No se pudo obtener recurso actualizado:", e);
+          }
+        }
       }
+
+      // Mostramos notificación después de actualizar la lista
+      Swal.fire({
+        icon: "success",
+        title: "Solicitud actualizada correctamente",
+        // text: "La solicitud se actualizó correctamente.",
+        timer: 1600,
+        showConfirmButton: false,
+        position: "center",
+      });
     } catch (error) {
       const status = error?.response?.status;
       const detail = error?.response?.data?.detail;
       console.error("❌ PUT /requests/:id error", { status, detail, error });
-      alert(
-        `No se pudo actualizar la solicitud.\n${
-          Array.isArray(detail)
-            ? JSON.stringify(detail)
-            : detail || error.message
-        }`,
-      );
+
+      Swal.fire({
+        icon: "error",
+        title: "Error al actualizar",
+        text: Array.isArray(detail)
+          ? JSON.stringify(detail)
+          : detail || error.message,
+      });
     } finally {
       setSaving(false);
     }
@@ -219,14 +259,14 @@ const RequestsView = ({
         totalPages={totalPages}
       />
 
-      {/* Lista de solicitudes */}
+      {/* Lista de solicitudes (usamos localRequests ahora) */}
       <div className="grid gap-4 grid-cols-1 xl:grid-cols-2">
-        {requests.length === 0 ? (
+        {localRequests.length === 0 ? (
           <div className="text-center text-gray-500 py-12 bg-white rounded-lg border xl:col-span-2">
             No hay solicitudes que coincidan con el filtro.
           </div>
         ) : (
-          requests.map((request) => (
+          localRequests.map((request) => (
             <RequestCard
               key={request.id}
               request={request}
@@ -283,7 +323,6 @@ const RequestsView = ({
         setEditData={setEditData}
         updateRequest={updateRequest}
         saving={saving}
-        // Enums alineados con creación/app
         typeOptions={["Soporte", "Mejora", "Desarrollo", "Capacitación"]}
         channelOptions={[
           "Sistema",
@@ -291,13 +330,13 @@ const RequestsView = ({
           "Correo Electrónico",
           "WhatsApp",
         ]}
-        // Departments ya es array de strings desde App
         departmentOptions={departments || []}
       />
     </div>
   );
 };
 
+// PaginationControls sin cambios (lo puedes mantener)
 function PaginationControls({
   position,
   pageInfo,
@@ -308,11 +347,10 @@ function PaginationControls({
   setPageSize,
   totalPages,
 }) {
+  /* ... tu impl. actual ... */
   return (
     <div
-      className={`flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${
-        position === "top" ? "" : "mt-6"
-      }`}
+      className={`flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${position === "top" ? "" : "mt-6"}`}
       data-testid={`pagination-${position}`}
     >
       <div className="text-sm text-gray-600">

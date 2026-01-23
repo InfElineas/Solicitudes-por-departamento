@@ -58,10 +58,17 @@ class RequestCreate(BaseModel):
     estimated_due: Optional[datetime] = None
 
 class RequestUpdate(BaseModel):
+    title: Optional[str]
+    description: Optional[str] 
+    priority: Optional[Literal["Alta", "Media", "Baja"]] 
+    type: Optional[RequestType] 
+    channel: Optional[RequestChannel] 
+    department: Optional[str] 
     status: Optional[RequestStatus] = None
     assigned_to: Optional[str] = None
     estimated_hours: Optional[float] = None
     estimated_due: Optional[datetime] = None
+
 
 class ClassifyPayload(BaseModel):
     level: int = Field(ge=1, le=3)

@@ -1,3 +1,4 @@
+// === EditRequestDialog.jsx ===
 import React from "react";
 import {
   Dialog,
@@ -75,7 +76,8 @@ const EditRequestDialog = ({
     if (editData.level !== "" && editData.level != null)
       payload.level = Number(editData.level);
     if (editData.assigned_to !== "" && editData.assigned_to != null)
-      payload.assigned_to = Number(editData.assigned_to);
+      // payload.assigned_to = Number(editData.assigned_to);
+      payload.assigned_to = editData.assigned_to;
     if (editData.estimated_hours !== "" && editData.estimated_hours != null) {
       payload.estimated_hours = Number(editData.estimated_hours);
     }
@@ -83,6 +85,8 @@ const EditRequestDialog = ({
     // fecha ISO (si viene)
     const iso = toISOorEmpty(editData.estimated_due);
     if (iso) payload.estimated_due = iso;
+
+    console.log("handleSubmit payload:", payload);
 
     // Disparamos el update pasando payload ya limpio
     updateRequest(requestId, payload);

@@ -118,30 +118,31 @@ async def assign(request_id: str, payload: dict, current=Depends(require_role(["
     if not target: raise HTTPException(400, "Usuario destino no encontrado")
     return await svc_assign(request_id, target, payload.get("estimated_hours"), payload.get("estimated_due"), current)
 
-@router.put("/{request_id}")
-async def update_generic(request_id: str, payload: dict, current=Depends(require_role(["support","admin"]))):
-    db = get_db()
-    doc = await db.requests.find_one({"id": request_id})
-    if not doc: raise HTTPException(404, "Request not found")
-    now = datetime.now(timezone.utc)
-    update = {k:v for k,v in (payload or {}).items() if v is not None}
-    update["updated_at"]=now
-    ops = {"$set": update}
-    # history si cambia status
-    if "status" in update and update["status"] and update["status"]!=doc["status"]:
-        ensure_transition(doc["status"], update["status"])
-        if update["status"] in {"Finalizada","Rechazada"}:
-            ops["$set"]["completion_date"]=now
-        ev = {"from_status": doc["status"], "to_status": update["status"], "by_user_id": current["id"], "by_user_name": current["full_name"], "at": now}
-        ops["$push"] = {"state_history": ev}
-        if doc["status"]=="Finalizada" and update["status"] in {"Pendiente","En progreso","En revisión"}:
-            ops.setdefault("$inc", {})["reabierto_count"]=1
-        await db.ticket_status_events.insert_one({"id":__import__("uuid").uuid4().hex,"ticket_id":request_id,"estado":update["status"],"changed_by":current["id"],"changed_at":now})
-    if "assigned_to" in update and update["assigned_to"]:
-        u = await db.users.find_one({"id": update["assigned_to"]})
-        if u: ops["$set"]["assigned_to_name"]=u["full_name"]
-    await db.requests.update_one({"id": request_id}, ops)
-    return normalize(await db.requests.find_one({"id": request_id}))
+# @router.put("/{request_id}")
+# async def update_generic(request_id: str, payload: dict, current=Depends(require_role(["support","admin"]))):
+#     print("### UPDATE FROM requests.py ###")
+#     db = get_db()
+#     doc = await db.requests.find_one({"id": request_id})
+#     if not doc: raise HTTPException(404, "Request not found")
+#     now = datetime.now(timezone.utc)
+#     update = {k:v for k,v in (payload or {}).items() if v is not None}
+#     update["updated_at"]=now
+#     ops = {"$set": update}
+#     # history si cambia status
+#     if "status" in update and update["status"] and update["status"]!=doc["status"]:
+#         ensure_transition(doc["status"], update["status"])
+#         if update["status"] in {"Finalizada","Rechazada"}:
+#             ops["$set"]["completion_date"]=now
+#         ev = {"from_status": doc["status"], "to_status": update["status"], "by_user_id": current["id"], "by_user_name": current["full_name"], "at": now}
+#         ops["$push"] = {"state_history": ev}
+#         if doc["status"]=="Finalizada" and update["status"] in {"Pendiente","En progreso","En revisión"}:
+#             ops.setdefault("$inc", {})["reabierto_count"]=1
+#         await db.ticket_status_events.insert_one({"id":__import__("uuid").uuid4().hex,"ticket_id":request_id,"estado":update["status"],"changed_by":current["id"],"changed_at":now})
+#     if "assigned_to" in update and update["assigned_to"]:
+#         u = await db.users.find_one({"id": update["assigned_to"]})
+#         if u: ops["$set"]["assigned_to_name"]=u["full_name"]
+#     await db.requests.update_one({"id": request_id}, ops)
+#     return normalize(await db.requests.find_one({"id": request_id}))
 
 @router.post("/{request_id}/transition")
 async def transition(request_id: str, payload: dict, current=Depends(require_role(["support","admin"]))):
