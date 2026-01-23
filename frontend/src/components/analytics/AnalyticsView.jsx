@@ -32,6 +32,8 @@ function AnalyticsView({
   setAnalyticsPeriod,
   analyticsFilters,
   setAnalyticsFilters,
+  filters,
+  setFilters,
   users = [],
 }) {
   const { filtered, global, ranking } = useProductivity(
@@ -39,6 +41,10 @@ function AnalyticsView({
     analyticsFilters,
     analyticsPeriod,
   );
+
+  const handleChange = (value) => {
+    setFilters({ ...filters, ["status"]: value });
+  };
 
   const maxFinished = useMemo(
     () => Math.max(...filtered.map((row) => Number(row.finished) || 0), 0),
@@ -132,6 +138,7 @@ function AnalyticsView({
               label="Total de solicitudes"
               value={global.assigned}
               sub="Asignadas en el periodo"
+              onClick={() => handleChange("all")}
             />
             <SummaryCard
               icon={<CheckCircle className="h-4 w-4 text-green-600" />}
@@ -139,24 +146,28 @@ function AnalyticsView({
               value={global.finished}
               sub="Cerradas"
               valueClass="text-green-600"
+              onClick={() => handleChange("Finalizada")}
             />
             <SummaryCard
               icon={<Clock className="h-4 w-4 text-sky-600" />}
               label="En proceso"
               value={global.inProgress}
               valueClass="text-sky-600"
+              onClick={() => handleChange("En progreso")}
             />
             <SummaryCard
               icon={<TrendingUp className="h-4 w-4 text-indigo-600" />}
               label="En revisión"
               value={global.inReview}
               valueClass="text-indigo-600"
+              onClick={() => handleChange("En revisión")}
             />
             <SummaryCard
               icon={<Settings2 className="h-4 w-4 text-orange-600" />}
               label="Pendientes"
               value={global.pending}
               valueClass="text-orange-600"
+              onClick={() => handleChange("Pendiente")}
             />
             <SummaryCard
               icon={<UserPlus className="h-4 w-4 text-muted-foreground" />}
@@ -418,9 +429,14 @@ const StackedBar = ({ row, max = 0 }) => {
   );
 };
 
-function SummaryCard({ icon, label, value, sub, valueClass = "" }) {
+function SummaryCard({ icon, label, value, sub, valueClass = "", onClick }) {
   return (
-    <Card>
+    <Card
+      onClick={onClick}
+      className={
+        onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""
+      }
+    >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium">{label}</CardTitle>
         {icon}
