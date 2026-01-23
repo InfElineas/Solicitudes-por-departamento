@@ -150,7 +150,7 @@ function AnalyticsView({
             />
             <SummaryCard
               icon={<Clock className="h-4 w-4 text-sky-600" />}
-              label="En proceso"
+              label="En progreso"
               value={global.inProgress}
               valueClass="text-sky-600"
               onClick={() => handleChange("En progreso")}
@@ -206,7 +206,7 @@ function AnalyticsView({
                       <tr>
                         <th className="py-2 pr-2">Técnico</th>
                         <th className="py-2 pr-2 text-right">Asignadas</th>
-                        <th className="py-2 pr-2 text-right">En proceso</th>
+                        <th className="py-2 pr-2 text-right">En progreso</th>
                         <th className="py-2 pr-2 text-right">En revisión</th>
                         <th className="py-2 pr-2 text-right">Finalizadas</th>
                         <th className="py-2 pr-2 text-right">Pendientes</th>
@@ -277,7 +277,7 @@ function AnalyticsView({
               <CardHeader>
                 <CardTitle>Distribución por estado</CardTitle>
                 <CardDescription>
-                  Asignadas, en proceso, revisión y pendientes por técnico
+                  Asignadas, en progreso, revisión y pendientes por técnico
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -293,7 +293,7 @@ function AnalyticsView({
                 {!noData && (
                   <div className="flex flex-wrap gap-3 text-xs text-gray-600 pt-2">
                     <LegendDot color="bg-orange-500" label="Pendientes" />
-                    <LegendDot color="bg-sky-500" label="En proceso" />
+                    <LegendDot color="bg-sky-500" label="En progreso" />
                     <LegendDot color="bg-indigo-500" label="En revisión" />
                     <LegendDot color="bg-green-500" label="Finalizadas" />
                   </div>
@@ -392,7 +392,7 @@ const BarItem = ({ label, value = 0, max = 0, colorClass }) => {
 const StackedBar = ({ row, max = 0 }) => {
   const segments = [
     { key: "pending", label: "Pendientes", color: "bg-orange-500" },
-    { key: "inProgress", label: "En proceso", color: "bg-sky-500" },
+    { key: "inProgress", label: "En progreso", color: "bg-sky-500" },
     { key: "inReview", label: "En revisión", color: "bg-indigo-500" },
     { key: "finished", label: "Finalizadas", color: "bg-green-500" },
   ];
