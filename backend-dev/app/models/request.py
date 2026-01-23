@@ -58,12 +58,12 @@ class RequestCreate(BaseModel):
     estimated_due: Optional[datetime] = None
 
 class RequestUpdate(BaseModel):
-    title: Optional[str]
-    description: Optional[str] 
-    priority: Optional[Literal["Alta", "Media", "Baja"]] 
-    type: Optional[RequestType] 
-    channel: Optional[RequestChannel] 
-    department: Optional[str] 
+    title: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[Literal["Alta", "Media", "Baja"]] = None
+    type: Optional[RequestType] = None
+    channel: Optional[RequestChannel] = None
+    department: Optional[str] = None
     status: Optional[RequestStatus] = None
     assigned_to: Optional[str] = None
     estimated_hours: Optional[float] = None

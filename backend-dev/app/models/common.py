@@ -2,7 +2,10 @@
 from typing import Literal
 
 RequestType = Literal["Soporte","Mejora","Desarrollo","Capacitación"]
-RequestChannel = Literal["WhatsApp","Correo","Sistema"]
+RequestChannel = Literal["Sistema",
+  "Google Sheets",
+  "Correo Electrónico",
+  "WhatsApp",]
 RequestStatus = Literal["Pendiente","En progreso","En revisión","Finalizada","Rechazada"]
 
 OPEN_STATES = ["Pendiente","En progreso","En revisión"]
