@@ -306,16 +306,87 @@ async def ensure_departments_on_startup():
         logger.exception("Error en ensure_departments_on_startup: %s", e)
 
 
+# def _normalize_request_doc(d: Dict[str, Any]) -> Dict[str, Any]:
+#     out = dict(d)
+#     out.setdefault("type", "Soporte")
+#     out.setdefault("channel", "Sistema")
+#     out.setdefault("status", "Pendiente")
+#     st = out.get("status")
+#     if isinstance(st, str) and st in STATUS_SYNONYMS:
+#         out["status"] = STATUS_SYNONYMS[st]
+#     if out.get("status") not in VALID_STATUSES:
+#         out["status"] = "Pendiente"
+#     return out
+
 def _normalize_request_doc(d: Dict[str, Any]) -> Dict[str, Any]:
-    out = dict(d)
+    out = dict(d)  # copia defensiva
+
+    # Defaults seguros
     out.setdefault("type", "Soporte")
     out.setdefault("channel", "Sistema")
     out.setdefault("status", "Pendiente")
+    out.setdefault("priority", "Media")
+
+    # --- Status (sinónimos ya existentes) ---
     st = out.get("status")
     if isinstance(st, str) and st in STATUS_SYNONYMS:
         out["status"] = STATUS_SYNONYMS[st]
     if out.get("status") not in VALID_STATUSES:
         out["status"] = "Pendiente"
+
+    # --- Channel: permitir los nuevos valores y mapear variantes ---
+    # Valores canónicos que queremos soportar
+    allowed_channels = {"Sistema", "Google Sheets", "Correo Electrónico", "WhatsApp"}
+
+    # Mapa de sinónimos (lowercase keys)
+    channel_map = {
+        "correo": "Correo Electrónico",
+        "correo electrónico": "Correo Electrónico",
+        "correo electronico": "Correo Electrónico",
+        "email": "Correo Electrónico",
+        "e-mail": "Correo Electrónico",
+        "google sheets": "Google Sheets",
+        "google-sheet": "Google Sheets",
+        "google_sheet": "Google Sheets",
+        # añade más variantes si las detectas en tu BD
+    }
+
+    ch = out.get("channel")
+    if isinstance(ch, str):
+        ch_str = ch.strip()
+        ch_lower = ch_str.lower()
+        if ch_lower in channel_map:
+            out["channel"] = channel_map[ch_lower]
+        elif ch_str not in allowed_channels:
+            # valor no permitido -> fallback a "Sistema"
+            out["channel"] = "Sistema"
+    else:
+        out["channel"] = "Sistema"
+
+    # --- Priority normalization (igual que antes) ---
+    allowed_priorities = {"Alta", "Media", "Baja"}
+    pr = out.get("priority")
+    if isinstance(pr, str):
+        pr_str = pr.strip().capitalize()
+        if pr_str in allowed_priorities:
+            out["priority"] = pr_str
+        else:
+            out["priority"] = "Media"
+    else:
+        out["priority"] = "Media"
+
+    # --- Type normalization ---
+    allowed_types = {"Soporte", "Mejora", "Desarrollo", "Capacitación"}
+    tp = out.get("type")
+    if isinstance(tp, str):
+        tp_str = tp.strip().capitalize()
+        if tp_str in allowed_types:
+            out["type"] = tp_str
+        else:
+            out["type"] = "Soporte"
+    else:
+        out["type"] = "Soporte"
+
     return out
 
 def _to_request(doc: Dict[str, Any]) -> Request:
