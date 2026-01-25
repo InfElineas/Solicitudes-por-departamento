@@ -365,7 +365,7 @@ const LegendDot = ({ color, label }) => (
   </span>
 );
 
-const BarItem = ({ label, value = 0, max = 0, colorClass }) => {
+const BarItem = ({ label, value = 0, max = 0 }) => {
   const clampedMax = Math.max(max, value, 1);
   const percentage = Math.min(
     100,
@@ -381,7 +381,7 @@ const BarItem = ({ label, value = 0, max = 0, colorClass }) => {
       </div>
       <div className="h-2 rounded bg-gray-100 overflow-hidden">
         <div
-          className={`h-2 ${colorClass}`}
+          className={`h-2 bg-slate-500`}
           style={{ width: `${percentage}%` }}
         />
       </div>
