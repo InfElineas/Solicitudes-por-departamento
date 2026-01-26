@@ -6,14 +6,6 @@ from app.core.config import settings
 from app.repositories import requests_repo as repo
 
 router = APIRouter()
-
-@router.delete("/{request_id}")
-async def soft_delete(request_id: str, current=Depends(require_role(["admin"]))):
-    doc = await repo.find_by_id(request_id)
-    if not doc: raise HTTPException(404, "Request not found")
-    await repo.delete_to_trash(doc, actor=current, ttl_days=settings.trash_ttl_days)
-    return {"ok": True}
-
 @router.get("/trash")
 async def list_trash(current=Depends(require_role(["admin"])),
                      page: int = Query(1, ge=1),
@@ -40,6 +32,15 @@ async def list_trash(current=Depends(require_role(["admin"])),
     items = [m(d) for d in docs]
     return {"items": items, "page": page, "page_size": page_size, "total": total,
             "total_pages": total_pages, "has_prev": page>1, "has_next": page<total_pages}
+
+
+@router.delete("/{request_id}")
+async def soft_delete(request_id: str, current=Depends(require_role(["admin"]))):
+    doc = await repo.find_by_id(request_id)
+    if not doc: raise HTTPException(404, "Request not found")
+    await repo.delete_to_trash(doc, actor=current, ttl_days=settings.trash_ttl_days)
+    return {"ok": True}
+
 
 @router.post("/{request_id}/restore")
 async def restore(request_id: str, current=Depends(require_role(["admin"]))):

@@ -783,6 +783,67 @@ async def get_departments(current_user: User = Depends(get_current_user)):
     return dept_list
 
 # ---- Requests ----
+class TrashItem(BaseModel):
+    id: str
+    title: str
+    department: str
+    requester_name: str
+    deleted_at: datetime
+    deleted_by_name: str
+    expires_at: datetime
+
+class PaginatedTrash(BaseModel):
+    items: List[TrashItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+    has_prev: bool
+    has_next: bool
+
+@api_router.get("/requests/trash", response_model=PaginatedTrash)
+async def list_trash(
+    current_user: User = Depends(require_role(["support", "admin"])),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=settings.max_page_size),
+    q: Optional[str] = Query(None),
+):
+    filt: Dict[str, Any] = {}
+    if q:
+        filt["$text"] = {"$search": q}
+
+    total = await db.requests_trash.count_documents(filt)
+    total_pages = max((total + page_size - 1) // page_size, 1)
+    page = min(page, total_pages)
+
+    cursor = (
+        db.requests_trash.find(filt)
+        .sort("deleted_at", -1)
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+    )
+    docs = await cursor.to_list(length=page_size)
+
+    def _map(d):
+        r = d.get("request_doc", {})
+        return TrashItem(
+            id=d["id"],
+            title=r.get("title", "—"),
+            department=r.get("department", "—"),
+            requester_name=r.get("requester_name", "—"),
+            deleted_at=d.get("deleted_at"),
+            deleted_by_name=d.get("deleted_by_name", "—"),
+            expires_at=d.get("expireAt"),
+        )
+
+    items = [_map(d) for d in docs]
+    return PaginatedTrash(
+        items=items,
+        page=page, page_size=page_size,
+        total=total, total_pages=total_pages,
+        has_prev=page > 1, has_next=page < total_pages
+    )
+
 @api_router.post("/requests", response_model=Request)
 async def create_request(payload: RequestCreate, current_user: User = Depends(get_current_user)):
     data = payload.dict(exclude_unset=True)
@@ -1262,66 +1323,8 @@ async def delete_request(
     await db.requests.delete_one({"id": request_id})
     return
 
-class TrashItem(BaseModel):
-    id: str
-    title: str
-    department: str
-    requester_name: str
-    deleted_at: datetime
-    deleted_by_name: str
-    expires_at: datetime
 
-class PaginatedTrash(BaseModel):
-    items: List[TrashItem]
-    page: int
-    page_size: int
-    total: int
-    total_pages: int
-    has_prev: bool
-    has_next: bool
 
-@api_router.get("/requests/trash", response_model=PaginatedTrash)
-async def list_trash(
-    current_user: User = Depends(require_role(["support", "admin"])),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=settings.max_page_size),
-    q: Optional[str] = Query(None),
-):
-    filt: Dict[str, Any] = {}
-    if q:
-        filt["$text"] = {"$search": q}
-
-    total = await db.requests_trash.count_documents(filt)
-    total_pages = max((total + page_size - 1) // page_size, 1)
-    page = min(page, total_pages)
-
-    cursor = (
-        db.requests_trash.find(filt)
-        .sort("deleted_at", -1)
-        .skip((page - 1) * page_size)
-        .limit(page_size)
-    )
-    docs = await cursor.to_list(length=page_size)
-
-    def _map(d):
-        r = d.get("request_doc", {})
-        return TrashItem(
-            id=d["id"],
-            title=r.get("title", "—"),
-            department=r.get("department", "—"),
-            requester_name=r.get("requester_name", "—"),
-            deleted_at=d.get("deleted_at"),
-            deleted_by_name=d.get("deleted_by_name", "—"),
-            expires_at=d.get("expireAt"),
-        )
-
-    items = [_map(d) for d in docs]
-    return PaginatedTrash(
-        items=items,
-        page=page, page_size=page_size,
-        total=total, total_pages=total_pages,
-        has_prev=page > 1, has_next=page < total_pages
-    )
 
 # ---- Restaurar desde papelera ----
 @api_router.post("/requests/{request_id}/restore", response_model=Request)
