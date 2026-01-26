@@ -25,6 +25,8 @@ import {
 const RequestFilters = ({
   filters,
   setFilters,
+  analyticsFilters,
+  setAnalyticsFilters,
   departments,
   setPage,
   users = [],
@@ -161,7 +163,10 @@ const RequestFilters = ({
         <Label className="text-sm">Asignado a</Label>
         <Select
           value={filters.assigned_to}
-          onValueChange={(value) => handleChange("assigned_to", value)}
+          onValueChange={(value) => {
+            setAnalyticsFilters({ ...analyticsFilters, ["technician"]: value });
+            handleChange("assigned_to", value);
+          }}
         >
           <SelectTrigger>
             <SelectValue

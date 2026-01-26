@@ -34,6 +34,7 @@ function AnalyticsView({
   setAnalyticsFilters,
   filters,
   setFilters,
+  setActiveTab,
   users = [],
 }) {
   const { filtered, global, ranking } = useProductivity(
@@ -44,6 +45,7 @@ function AnalyticsView({
 
   const handleChange = (value) => {
     setFilters({ ...filters, ["status"]: value });
+    setActiveTab("requests");
   };
 
   const maxFinished = useMemo(
@@ -60,6 +62,7 @@ function AnalyticsView({
 
   const handleFilterChange = (key, value) => {
     setAnalyticsFilters((prev) => ({ ...prev, [key]: value }));
+    setFilters((prev) => ({ ...prev, ["assigned_to"]: value }));
   };
 
   const noData = !analytics || filtered.length === 0;

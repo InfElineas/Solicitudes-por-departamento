@@ -21,6 +21,8 @@ const RequestsView = ({
   requests,
   filters,
   setFilters,
+  analyticsFilters,
+  setAnalyticsFilters,
   departments,
   setRequestDialog,
   requestDialog,
@@ -242,6 +244,8 @@ const RequestsView = ({
       <RequestFilters
         filters={filters}
         setFilters={setFilters}
+        analyticsFilters={analyticsFilters}
+        setAnalyticsFilters={setAnalyticsFilters}
         departments={departments}
         setPage={setPage}
         users={users}

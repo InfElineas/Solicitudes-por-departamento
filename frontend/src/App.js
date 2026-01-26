@@ -308,7 +308,7 @@ function App() {
     try {
       const stored = JSON.parse(localStorage.getItem("analyticsFilters"));
       return stored || { technician: "all", department: "all" };
-    } catch (e) {
+    } catch {
       return { technician: "all", department: "all" };
     }
   });
@@ -1100,6 +1100,8 @@ function App() {
               requests={requests}
               filters={filters}
               setFilters={setFilters}
+              analyticsFilters={analyticsFilters}
+              setAnalyticsFilters={setAnalyticsFilters}
               departments={departments}
               requestDialog={requestDialog}
               setRequestDialog={setRequestDialog}
@@ -1139,6 +1141,7 @@ function App() {
                 setAnalyticsFilters={setAnalyticsFilters}
                 filters={filters}
                 setFilters={setFilters}
+                setActiveTab={setActiveTab}
                 users={users.filter((u) => u.role === "support")}
               />
             </TabsContent>
