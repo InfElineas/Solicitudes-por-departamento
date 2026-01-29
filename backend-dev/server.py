@@ -523,26 +523,64 @@ async def migrate_requests_schema() -> None:
 
 async def migrate_users_department_schema() -> None:
     """
-    Convierte usuarios con department:string -> department:[string].
-    Idempotente.
+    Normaliza campo `department` en la colección `users` a List[str].
+    - Si department es string -> [trimmed string]
+    - Si es array -> limpiar sus elementos
+    - Si es dict -> intentar extraer name/label/id -> [value]
+    - Si no existe -> []
+    Idempotente: sólo actualiza si el valor limpio difiere del almacenado.
     """
-    # Strings -> arrays
-    await db.users.update_many(
-        {"department": {"$type": "string"}},
-        [{"$set": {"department": [{"$trim": {"input": "$department"}}]}}]  # pipeline update (Mongo 4.2+)
-    )
-    # Null/No existe -> []
-    await db.users.update_many(
-        {"$or": [{"department": {"$exists": False}}, {"department": None}]},
-        {"$set": {"department": []}}
-    )
-    # Limpieza: arrays con elementos vacíos -> remover vacíos
-    users = await db.users.find({"department": {"$type": "array"}}).to_list(1000)
-    for u in users:
-        cleaned = [str(x).strip() for x in u.get("department", []) if str(x).strip() != ""]
-        # sólo actualizar si cambia
-        if cleaned != u.get("department", []):
-            await db.users.update_one({"id": u["id"]}, {"$set": {"department": cleaned}})
+    try:
+        # Asegura que los que no tienen campo department reciban []
+        await db.users.update_many(
+            {"$or": [{"department": {"$exists": False}}, {"department": None}]},
+            {"$set": {"department": []}}
+        )
+
+        # Iterar documentos en streaming para evitar problemas con operaciones por lotes
+        cursor = db.users.find({}, {"id": 1, "department": 1})
+        async for u in cursor:
+            try:
+                orig = u.get("department", None)
+                cleaned = []
+
+                # None ya manejado por el primer update_many, pero por seguridad:
+                if orig is None:
+                    cleaned = []
+                elif isinstance(orig, list):
+                    cleaned = [str(x).strip() for x in orig if str(x).strip() != ""]
+                elif isinstance(orig, str):
+                    s = orig.strip()
+                    cleaned = [s] if s != "" else []
+                elif isinstance(orig, dict):
+                    # extraer nombre representativo del dict
+                    name = orig.get("name") or orig.get("label") or orig.get("id") or str(orig)
+                    name = str(name).strip()
+                    cleaned = [name] if name else []
+                else:
+                    # otros tipos raros -> stringify
+                    cleaned = [str(orig).strip()] if str(orig).strip() != "" else []
+
+                # Comparar con lo almacenado (asegurando lista)
+                stored = u.get("department", [])
+                # normalize stored into list of strings for comparison
+                if isinstance(stored, list):
+                    stored_norm = [str(x).strip() for x in stored if str(x).strip() != ""]
+                elif isinstance(stored, str):
+                    stored_norm = [stored.strip()] if stored.strip() != "" else []
+                else:
+                    stored_norm = []
+
+                if cleaned != stored_norm:
+                    await db.users.update_one({"id": u.get("id")}, {"$set": {"department": cleaned}})
+            except Exception as e:
+                # no detener toda la migración por un documento problemático
+                logger.exception("migrate_users_department_schema: fallo procesando usuario %s: %s", u.get("id"), e)
+        logger.info("migrate_users_department_schema: finalizada correctamente")
+    except Exception as e:
+        logger.exception("migrate_users_department_schema: error general: %s", e)
+        raise
+
 
 
 async def record_failed_login(username: str, ip: str, window_min: int):
