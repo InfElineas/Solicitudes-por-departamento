@@ -34,7 +34,6 @@ function AnalyticsView({
   setAnalyticsFilters,
   filters,
   setFilters,
-  setActiveTab,
   users = [],
 }) {
   const { filtered, global, ranking } = useProductivity(
@@ -45,7 +44,6 @@ function AnalyticsView({
 
   const handleChange = (value) => {
     setFilters({ ...filters, ["status"]: value });
-    setActiveTab("requests");
   };
 
   const maxFinished = useMemo(
@@ -62,7 +60,6 @@ function AnalyticsView({
 
   const handleFilterChange = (key, value) => {
     setAnalyticsFilters((prev) => ({ ...prev, [key]: value }));
-    setFilters((prev) => ({ ...prev, ["assigned_to"]: value }));
   };
 
   const noData = !analytics || filtered.length === 0;
@@ -71,12 +68,12 @@ function AnalyticsView({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-2xl font-bold text-gray-900">
+        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
           Análisis y Métricas
         </h2>
-        <div className="flex flex-wrap items-center gap-3 max-md:w-full">
+        <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3 max-md:w-full">
           <Select value={analyticsPeriod} onValueChange={setAnalyticsPeriod}>
-            <SelectTrigger className="w-48 max-md:w-full">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -91,7 +88,7 @@ function AnalyticsView({
             value={analyticsFilters?.technician || "all"}
             onValueChange={(value) => handleFilterChange("technician", value)}
           >
-            <SelectTrigger className="w-48 max-md:w-full">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Técnico" />
             </SelectTrigger>
             <SelectContent>
@@ -135,7 +132,7 @@ function AnalyticsView({
       {analytics && (
         <>
           {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <SummaryCard
               icon={<FileText className="h-4 w-4 text-muted-foreground" />}
               label="Total de solicitudes"
@@ -368,7 +365,7 @@ const LegendDot = ({ color, label }) => (
   </span>
 );
 
-const BarItem = ({ label, value = 0, max = 0 }) => {
+const BarItem = ({ label, value = 0, max = 0, colorClass }) => {
   const clampedMax = Math.max(max, value, 1);
   const percentage = Math.min(
     100,
@@ -384,7 +381,7 @@ const BarItem = ({ label, value = 0, max = 0 }) => {
       </div>
       <div className="h-2 rounded bg-gray-100 overflow-hidden">
         <div
-          className={`h-2 bg-slate-500`}
+          className={`h-2 ${colorClass}`}
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -437,7 +434,9 @@ function SummaryCard({ icon, label, value, sub, valueClass = "", onClick }) {
     <Card
       onClick={onClick}
       className={
-        onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""
+        `${
+          onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""
+        } w-full max-w-[20rem] sm:max-w-none mx-auto`
       }
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

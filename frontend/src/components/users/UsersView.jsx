@@ -6,6 +6,9 @@ import { Button } from "../ui/button";
 // util: convierte cualquier valor a texto seguro y registra objetos
 const safeText = (val, context = "") => {
   if (val === undefined || val === null) return "—";
+  if (Array.isArray(val)) {
+    return val.length ? val.join(", ") : "—";
+  }
   if (
     typeof val === "string" ||
     typeof val === "number" ||
@@ -13,9 +16,8 @@ const safeText = (val, context = "") => {
   ) {
     return String(val);
   }
-  // es objeto/array -> avisar en consola para debug y devolver etiqueta
+  // es objeto -> intentar name/id o stringify
   console.warn("safeText: rendering object as string", { context, val });
-  // si viene un objeto departamento con .name, preferir name
   if (typeof val === "object") {
     if (val.name) return String(val.name);
     if (val.id) return String(val.id);
@@ -64,7 +66,7 @@ function UsersView({ users = [], onDeleteUser, onEditUser }) {
   }, [users]);
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
       {users.map((u) => {
         // seguridad: normalizar labels
         const deptLabel = safeText(u?.department, `user:${u?.id}:department`);
@@ -75,7 +77,10 @@ function UsersView({ users = [], onDeleteUser, onEditUser }) {
         );
 
         return (
-          <Card key={u.id ?? JSON.stringify(u).slice(0, 8)}>
+          <Card
+            key={u.id ?? JSON.stringify(u).slice(0, 8)}
+            className="w-full max-w-sm sm:max-w-none mx-auto"
+          >
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">

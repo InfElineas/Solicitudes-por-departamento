@@ -1,8 +1,20 @@
 // src/App.js
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import "./App.css";
 import axios from "axios";
-import { AUTH_EXPIRED_EVENT, notifyAuthExpired } from "./utils/session";
+import {
+  AUTH_EXPIRED_EVENT,
+  clearStoredToken,
+  getStoredToken,
+  notifyAuthExpired,
+  storeToken,
+} from "./utils/session";
 
 import {
   Dialog,
@@ -18,7 +30,7 @@ import { buildPeriodParams } from "./components/analytics/analyticsUtils";
 import DepartmentsView from "./components/departaments/DepartmentsView.jsx";
 import UsersView from "./components/users/UsersView";
 import HeaderBar from "./components/layouts/HeaderBar.jsx";
-import NavigationTabs from "./components/layouts/NavigationTabs.jsx";
+import Sidebar from "./components/layouts/Sidebar.jsx";
 import AssignDialog from "./components/requests/AssignDialog";
 
 import { Button } from "./components/ui/button";
@@ -26,6 +38,7 @@ import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { Badge } from "./components/ui/badge";
 import { Tabs, TabsContent } from "./components/ui/tabs";
+import { Sheet, SheetContent } from "./components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -43,6 +56,7 @@ import {
   LogOut,
   User,
   Building,
+  Trash2,
   Clock,
   CheckCircle,
   TrendingUp,
@@ -62,6 +76,7 @@ import {
   CardHeader,
   CardTitle,
 } from "./components/ui/card";
+import { ThemeToggle } from "./components/ui/theme-toggle";
 
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.css";
@@ -96,11 +111,11 @@ const API_BASE = RAW_BACKEND
   ? `${RAW_BACKEND.replace(/\/+$/, "")}/api`
   : "/api";
 
-const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
+const api = axios.create({ baseURL: API_BASE, timeout: 15000 });
 
 // Inyecta Bearer
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = getStoredToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -112,7 +127,8 @@ api.interceptors.response.use(
     const cfg = err.config || {};
     const retriable =
       !err.response &&
-      (err.code === "ECONNABORTED" || err.message?.includes("Network Error"));
+      (err.code === "ECONNABORTED" || err.message?.includes("Network Error")) &&
+      !String(cfg?.url || "").includes("/auth/login");
 
     if (retriable) {
       cfg.__retryCount = (cfg.__retryCount || 0) + 1;
@@ -135,9 +151,21 @@ api.interceptors.response.use(
    =========================== */
 function App() {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [token, setToken] = useState(getStoredToken());
   const [loading, setLoading] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const skipNextAuthCheck = useRef(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("sidebarCollapsed") === "true";
+  });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed));
+    }
+  }, [sidebarCollapsed]);
 
   // pestaña activa (persistente)
   const [activeTab, setActiveTab] = useState(
@@ -287,9 +315,17 @@ function App() {
     username: "",
     password: "",
     full_name: "",
-    department: "",
+    department: "", // espejo para el single-select UI
+    departments: [], // canonical: siempre array (se envía al backend)
     position: "Especialista",
     role: "employee",
+  });
+  const [departmentUserDialog, setDepartmentUserDialog] = useState(false);
+  const [departmentUserForm, setDepartmentUserForm] = useState({
+    full_name: "",
+    email: "",
+    role: "employee",
+    status: "active",
   });
 
   // departments
@@ -308,7 +344,7 @@ function App() {
     try {
       const stored = JSON.parse(localStorage.getItem("analyticsFilters"));
       return stored || { technician: "all", department: "all" };
-    } catch {
+    } catch (e) {
       return { technician: "all", department: "all" };
     }
   });
@@ -350,10 +386,7 @@ function App() {
   const logout = useCallback((message) => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem("token");
-    sessionStorage.removeItem("token");
-    localStorage.removeItem("access_token");
-    sessionStorage.removeItem("access_token");
+    clearStoredToken();
     setActiveTab("requests");
     setAuthChecked(true);
     if (message) toast.error(message);
@@ -384,8 +417,30 @@ function App() {
       setAuthChecked(true);
       return;
     }
+    if (skipNextAuthCheck.current) {
+      skipNextAuthCheck.current = false;
+      setAuthChecked(true);
+      return;
+    }
     setAuthChecked(false);
     fetchCurrentUser();
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(
+      async () => {
+        try {
+          await api.get("/auth/me");
+        } catch (error) {
+          if (error?.response?.status === 401) {
+            notifyAuthExpired();
+          }
+        }
+      },
+      5 * 60 * 1000,
+    );
+    return () => clearInterval(interval);
   }, [token]);
 
   useEffect(() => {
@@ -420,7 +475,9 @@ function App() {
     } catch (error) {
       console.error("Error fetching user:", error);
       if (!isUnauthorized(error)) {
-        logout("No se pudo validar tu sesión. Inicia sesión nuevamente.");
+        toast.error(
+          "No se pudo validar tu sesión. Verifica la conexión y reintenta.",
+        );
       }
     }
     setAuthChecked(true);
@@ -462,15 +519,27 @@ function App() {
     try {
       const { data } = await api.get("/users");
       const raw = data;
-      const normalized = raw.map((u) => ({
-        ...u,
-        department:
-          u.department && typeof u.department === "object"
-            ? u.department.name ||
-              u.department.id ||
-              JSON.stringify(u.department)
-            : u.department || "",
-      }));
+      const normalized = raw.map((u) => {
+        // Normalizar department -> siempre array de strings
+        let deptArray = [];
+        if (Array.isArray(u.department)) {
+          deptArray = u.department;
+        } else if (u.department && typeof u.department === "string") {
+          deptArray = [u.department];
+        } else if (u.department && typeof u.department === "object") {
+          // caso objeto legacy: intentar name/id o stringify
+          if (u.department.name) deptArray = [u.department.name];
+          else if (u.department.id) deptArray = [u.department.id];
+          else deptArray = [JSON.stringify(u.department)];
+        } else {
+          deptArray = [];
+        }
+
+        return {
+          ...u,
+          department: deptArray,
+        };
+      });
       setUsers(normalized);
     } catch (error) {
       console.error("Error fetching users:", error);
@@ -531,13 +600,31 @@ function App() {
         { username: loginData.username, password: loginData.password },
         { headers: { "Content-Type": "application/json" } },
       );
-      const { access_token } = data;
-      localStorage.setItem("token", access_token);
-      setAuthChecked(false);
-      setToken(access_token);
+      const accessToken = data?.access_token || data?.token;
+      const userFromLogin =
+        data?.user || data?.current_user || data?.profile || null;
+      if (!accessToken) {
+        toast.error("No se recibió un token válido.");
+        setLoading(false);
+        return;
+      }
+
+      storeToken(accessToken);
+      skipNextAuthCheck.current = true;
+      if (userFromLogin) {
+        setUser(userFromLogin);
+      } else {
+        const meResponse = await api.get("/auth/me", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        setUser(meResponse.data);
+      }
+      setToken(accessToken);
+      setAuthChecked(true);
       toast.success("¡Bienvenido!");
     } catch (error) {
       console.error("Login error:", error);
+      clearStoredToken();
       toast.error(error?.response?.data?.detail || "Credenciales incorrectas");
     }
     setLoading(false);
@@ -619,7 +706,21 @@ function App() {
     }
 
     try {
-      await api.post("/users", newUser);
+      const payload = {
+        username: newUser.username,
+        password: newUser.password,
+        full_name: newUser.full_name,
+        department:
+          Array.isArray(newUser.departments) && newUser.departments.length
+            ? newUser.departments
+            : newUser.department
+              ? [newUser.department]
+              : [],
+        position: newUser.position,
+        role: newUser.role,
+      };
+
+      await api.post("/users", payload);
 
       // reset UI
       setNewUser({
@@ -627,6 +728,7 @@ function App() {
         password: "",
         full_name: "",
         department: "",
+        departments: [],
         position: "Especialista",
         role: "employee",
       });
@@ -636,7 +738,7 @@ function App() {
       // SweetAlert after success
       await Swal.fire({
         title: "Creado",
-        html: `Usuario <strong>@${newUser.username}</strong> creado exitosamente.`,
+        html: `Usuario <strong>@${payload.username}</strong> creado exitosamente.`,
         icon: "success",
         confirmButtonText: "Aceptar",
       });
@@ -654,7 +756,69 @@ function App() {
         confirmButtonText: "Cerrar",
       });
 
-      // keep toast-based error as secondary feedback (optional)
+      toast.error(message);
+    }
+  };
+
+  const createDepartmentUser = async (event) => {
+    event.preventDefault();
+    const trimmedName = departmentUserForm.full_name.trim();
+    const trimmedEmail = departmentUserForm.email.trim();
+    const allowedRoles = ["employee", "support"];
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!trimmedName) {
+      toast.error("El nombre es obligatorio");
+      return;
+    }
+
+    if (!emailPattern.test(trimmedEmail)) {
+      toast.error("El correo no es válido");
+      return;
+    }
+
+    if (!allowedRoles.includes(departmentUserForm.role)) {
+      toast.error("Selecciona un rol permitido");
+      return;
+    }
+
+    if (!departmentContext.departmentId && !departmentContext.departmentName) {
+      toast.error("No se pudo determinar el departamento del usuario");
+      return;
+    }
+
+    const payload = {
+      full_name: trimmedName,
+      email: trimmedEmail,
+      role: departmentUserForm.role,
+      is_active: departmentUserForm.status === "active",
+    };
+
+    if (departmentContext.departmentId) {
+      payload.department_id = departmentContext.departmentId;
+    }
+
+    if (departmentContext.departmentName) {
+      payload.department = departmentContext.departmentName;
+    }
+
+    try {
+      await api.post("/users", payload);
+      toast.success("Usuario creado exitosamente");
+      setDepartmentUserDialog(false);
+      setDepartmentUserForm({
+        full_name: "",
+        email: "",
+        role: "employee",
+        status: "active",
+      });
+      await fetchUsers();
+    } catch (error) {
+      console.error("Error creating department user:", error);
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        "Error al crear usuario";
       toast.error(message);
     }
   };
@@ -824,30 +988,30 @@ function App() {
   const getStatusColor = (status) => {
     switch (status) {
       case "Pendiente":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-200";
       case "En progreso":
-        return "bg-blue-100 text-blue-800";
+        return "bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200";
       case "En revisión":
-        return "bg-purple-100 text-purple-800";
+        return "bg-purple-100 text-purple-800 dark:bg-purple-500/20 dark:text-purple-200";
       case "Finalizada":
-        return "bg-green-100 text-green-800";
+        return "bg-green-100 text-green-800 dark:bg-emerald-500/20 dark:text-emerald-200";
       case "Rechazada":
-        return "bg-red-100 text-red-800";
+        return "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-200";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-gray-100 text-gray-800 dark:bg-slate-700/40 dark:text-slate-200";
     }
   };
 
   const getPriorityColor = (priority) => {
     switch (priority) {
       case "Alta":
-        return "bg-red-100 text-red-800";
+        return "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-200";
       case "Media":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-500/20 dark:text-yellow-200";
       case "Baja":
-        return "bg-green-100 text-green-800";
+        return "bg-green-100 text-green-800 dark:bg-emerald-500/20 dark:text-emerald-200";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-gray-100 text-gray-800 dark:bg-slate-700/40 dark:text-slate-200";
     }
   };
 
@@ -857,57 +1021,216 @@ function App() {
     return { from, to };
   }, [page, pageSize, total]);
 
+  const normalizedRole = String(user?.role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  const isDepartmentManager =
+    normalizedRole === "jefe_departamento" ||
+    normalizedRole === "department_manager";
+
+  const departmentContext = useMemo(() => {
+    const deptList = Array.isArray(user?.department)
+      ? user.department
+      : user?.department
+        ? [user.department]
+        : [];
+
+    const departmentId = user?.department_id ?? null;
+    // Para casos en que el usuario tenga varios departamentos, usamos el primero como contexto simple
+    const departmentName = deptList.length ? deptList[0] : null;
+
+    return { departmentId, departmentName, departmentList: deptList };
+  }, [user]);
+
+  // TODO: reemplazar por filtrado en backend cuando exista endpoint por departamento.
+  const departmentUsers = useMemo(() => {
+    const { departmentId, departmentName } = departmentContext;
+    if (!departmentId && !departmentName) return users;
+    return users.filter((candidate) => {
+      const candidateDepartmentId =
+        candidate?.department_id ??
+        (typeof candidate?.department === "object"
+          ? candidate?.department?.id
+          : null);
+      const candidateDepartmentName =
+        typeof candidate?.department === "string"
+          ? candidate.department
+          : (candidate?.department?.name ?? candidate?.department_name ?? null);
+
+      if (departmentId) {
+        if (candidateDepartmentId) {
+          return String(candidateDepartmentId) === String(departmentId);
+        }
+        if (departmentName && candidateDepartmentName) {
+          return candidateDepartmentName === departmentName;
+        }
+        return false;
+      }
+
+      if (departmentName && candidateDepartmentName) {
+        return candidateDepartmentName === departmentName;
+      }
+
+      return false;
+    });
+  }, [departmentContext, users]);
+
+  const departmentStats = useMemo(() => {
+    const resolveActiveFlag = (candidate) => {
+      if (typeof candidate?.is_active === "boolean") return candidate.is_active;
+      if (typeof candidate?.active === "boolean") return candidate.active;
+      const statusValue = candidate?.status ?? candidate?.estado ?? null;
+      if (statusValue) {
+        const normalized = String(statusValue).toLowerCase();
+        if (
+          ["activo", "activa", "active", "enabled", "habilitado"].includes(
+            normalized,
+          )
+        ) {
+          return true;
+        }
+        if (
+          ["inactivo", "inactive", "disabled", "deshabilitado"].includes(
+            normalized,
+          )
+        ) {
+          return false;
+        }
+      }
+      return null;
+    };
+
+    const now = Date.now();
+    let activeCount = 0;
+    let inactiveCount = 0;
+    let recentCount = 0;
+    let hasCreatedAt = false;
+
+    departmentUsers.forEach((candidate) => {
+      const activeFlag = resolveActiveFlag(candidate);
+      if (activeFlag === true) activeCount += 1;
+      if (activeFlag === false) inactiveCount += 1;
+
+      if (candidate?.created_at) {
+        hasCreatedAt = true;
+        const createdAtTime = new Date(candidate.created_at).getTime();
+        if (!Number.isNaN(createdAtTime)) {
+          const diffDays = (now - createdAtTime) / (1000 * 60 * 60 * 24);
+          if (diffDays <= 7) recentCount += 1;
+        }
+      }
+    });
+
+    return {
+      total: departmentUsers.length,
+      active: activeCount,
+      inactive: inactiveCount,
+      recent: recentCount,
+      hasCreatedAt,
+    };
+  }, [departmentUsers]);
+
+  const navItems = useMemo(
+    () => [
+      {
+        value: "requests",
+        label: "Solicitudes",
+        icon: FileText,
+        show: true,
+      },
+      {
+        value: "analytics",
+        label: "Análisis",
+        icon: BarChart3,
+        show: user?.role === "support" || user?.role === "admin",
+      },
+      {
+        value: "trash",
+        label: "Papelera",
+        icon: Trash2,
+        show: user?.role === "support" || user?.role === "admin",
+      },
+      {
+        value: "users",
+        label: "Usuarios",
+        icon: Users,
+        show:
+          user?.role === "support" ||
+          user?.role === "admin" ||
+          isDepartmentManager,
+      },
+      {
+        value: "departments",
+        label: "Departamentos",
+        icon: Building,
+        show: user?.role === "support" || user?.role === "admin",
+      },
+    ],
+    [isDepartmentManager, user],
+  );
+
+  const activeTitle =
+    navItems.find((item) => item.value === activeTab)?.label || "Panel";
+
   /* ===========================
                UI
      =========================== */
   if (!authChecked) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="text-sm text-gray-600">Validando sesión…</div>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center px-4">
+        <div className="text-sm text-gray-600 dark:text-slate-300">
+          Validando sesión…
+        </div>
       </div>
     );
   }
 
   if (!token) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-slate-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-5 gap-6">
-          <Card className="lg:col-span-2 bg-white/70 backdrop-blur shadow-sm border border-indigo-50">
-            <CardHeader className="space-y-2">
-              <CardTitle className="text-2xl font-bold text-gray-900">
+      <div className="relative min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.25),_transparent_55%)] dark:bg-[radial-gradient(circle_at_top,_rgba(30,41,59,0.6),_transparent_60%)]" />
+        <div className="absolute right-4 top-4">
+          <ThemeToggle />
+        </div>
+        <div className="relative w-full max-w-6xl grid grid-cols-1 lg:grid-cols-5 gap-8">
+          <Card className="lg:col-span-2 bg-white/70 dark:bg-slate-900/80 backdrop-blur border border-slate-200/70 dark:border-slate-800 shadow-sm">
+            <CardHeader className="space-y-3">
+              <CardTitle className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
                 Sistema de Solicitudes
               </CardTitle>
-              <CardDescription className="text-sm text-gray-700">
-                Gestiona, asigna y da seguimiento a las solicitudes con una
-                interfaz optimizada para cualquier dispositivo.
+              <CardDescription className="text-sm text-slate-600 dark:text-slate-300">
+                Una plataforma centralizada para crear, priorizar y dar
+                seguimiento a solicitudes internas con un flujo claro.
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-sm text-gray-600 space-y-2">
+            <CardContent className="text-sm text-slate-600 dark:text-slate-300 space-y-3">
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-green-500" /> Sesión
-                segura y control de tiempo de inactividad.
+                <div className="h-2 w-2 rounded-full bg-emerald-500" />{" "}
+                Autenticación segura y verificada.
               </div>
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-blue-500" /> Experiencia
-                responsiva en móvil, tablet y desktop.
+                <div className="h-2 w-2 rounded-full bg-sky-500" /> Diseño
+                optimizado para móvil y desktop.
               </div>
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-purple-500" /> Paneles
-                de métricas en tiempo real.
+                <div className="h-2 w-2 rounded-full bg-indigo-500" /> Insights
+                y métricas en tiempo real.
               </div>
             </CardContent>
           </Card>
 
-          <Card className="lg:col-span-3 shadow-sm">
-            <CardHeader className="text-center space-y-1">
-              <CardTitle className="text-2xl font-bold text-gray-900">
+          <Card className="lg:col-span-3 bg-white/90 dark:bg-slate-900/90 border border-slate-200/70 dark:border-slate-800 shadow-md">
+            <CardHeader className="text-left space-y-2">
+              <CardTitle className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
                 Inicia sesión
               </CardTitle>
-              <CardDescription>
-                Accede con tus credenciales corporativas.
+              <CardDescription className="text-sm text-slate-500 dark:text-slate-300">
+                Accede con tus credenciales corporativas para continuar.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
               <form onSubmit={login} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="username">Usuario</Label>
@@ -919,6 +1242,7 @@ function App() {
                       setLoginData({ ...loginData, username: e.target.value })
                     }
                     required
+                    className="h-11"
                   />
                 </div>
                 <div className="space-y-2">
@@ -931,19 +1255,24 @@ function App() {
                       setLoginData({ ...loginData, password: e.target.value })
                     }
                     required
+                    className="h-11"
                   />
                 </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Iniciando sesión..." : "Iniciar sesión"}
+                <Button
+                  type="submit"
+                  className="w-full h-11"
+                  disabled={loading}
+                >
+                  {loading ? "Validando acceso..." : "Iniciar sesión"}
                 </Button>
               </form>
-              <div className="mt-6 p-4 bg-gray-50 rounded-lg text-left">
-                <p className="text-xs font-normal text-gray-700 mb-1">
-                  Plataforma desarrollada por el equipo de Soporte.
+              <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 p-4 text-xs text-slate-600 dark:text-slate-300">
+                <p className="font-medium text-slate-700 dark:text-slate-200 mb-1">
+                  Seguridad reforzada
                 </p>
-                <p className="text-xs text-gray-600">
-                  Si tu sesión expira, volverás automáticamente a esta pantalla
-                  para mantener la seguridad.
+                <p>
+                  Tu sesión se valida antes de ingresar para evitar accesos
+                  inconsistentes.
                 </p>
               </div>
             </CardContent>
@@ -960,9 +1289,10 @@ function App() {
     // ✅ Validación dura: debe tener username o role para ser usuario
     if (!userObj.username && !userObj.role) {
       console.error("openEditUser recibió objeto que NO es usuario:", userObj);
-      return; // ⛔ cortar aquí
+      return;
     }
 
+    // Normalizar nombre y posición
     const normalize = (val) => {
       if (val === undefined || val === null) return "";
       if (typeof val === "string" || typeof val === "number")
@@ -973,16 +1303,28 @@ function App() {
       return String(val);
     };
 
-    const departmentValue = normalize(userObj.department);
-    const positionValue = normalize(userObj.position);
+    // Normalizar departamentos a array
+    let deptArray = [];
+    if (Array.isArray(userObj.department)) {
+      deptArray = userObj.department;
+    } else if (userObj.department && typeof userObj.department === "string") {
+      deptArray = [userObj.department];
+    } else if (userObj.department && typeof userObj.department === "object") {
+      deptArray = [
+        userObj.department.name ||
+          userObj.department.id ||
+          JSON.stringify(userObj.department),
+      ];
+    }
 
     setEditUser({
       id: userObj.id || "",
       username: userObj.username || "",
       full_name: userObj.full_name || "",
       role: userObj.role || "employee",
-      department: departmentValue,
-      position: positionValue,
+      department: deptArray[0] || "",
+      departments: deptArray,
+      position: userObj.position || "Especialista",
       password: "",
     });
 
@@ -1075,243 +1417,547 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <HeaderBar
-        user={user}
-        onLogout={logout}
-        onUpdateProfile={updateProfile}
-      />
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex">
+      <div className="hidden lg:flex">
+        <Sidebar
+          items={navItems}
+          activeTab={activeTab}
+          onChange={setActiveTab}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        />
+      </div>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <div className="sticky top-0 z-10 bg-gray-50 -mx-4 sm:mx-0 pb-4">
-            <div className="px-4 sm:px-0">
-              <NavigationTabs user={user} />
-            </div>
-          </div>
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="left" className="p-0">
+          <Sidebar
+            items={navItems}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            collapsed={false}
+            onToggleCollapse={() => {}}
+            onNavigate={() => setMobileNavOpen(false)}
+            isMobile
+          />
+        </SheetContent>
+      </Sheet>
 
-          {/* Requests Tab */}
-          <TabsContent value="requests" className="space-y-4">
-            <RequestsView
-              user={user}
-              users={users}
-              requests={requests}
-              filters={filters}
-              setFilters={setFilters}
-              analyticsFilters={analyticsFilters}
-              setAnalyticsFilters={setAnalyticsFilters}
-              departments={departments}
-              requestDialog={requestDialog}
-              setRequestDialog={setRequestDialog}
-              newRequest={newRequest}
-              setNewRequest={setNewRequest}
-              createRequest={createRequest}
-              deleteRequest={deleteRequest}
-              page={page}
-              setPage={setPage}
-              pageSize={pageSize}
-              setPageSize={setPageSize}
-              total={total}
-              totalPages={totalPages}
-              pageInfo={pageInfo}
-              setClassifyDialogFor={setClassifyDialogFor}
-              setClassifyData={setClassifyData}
-              setAssignDialogFor={setAssignDialogFor}
-              setAssignData={setAssignData}
-              setFeedbackDialogFor={setFeedbackDialogFor}
-              setFeedbackData={setFeedbackData}
-              takeRequest={takeRequest}
-              rejectRequest={rejectRequest}
-              sendToReview={sendToReview}
-              backToProgress={backToProgress}
-              finishRequest={finishRequest}
-            />
-          </TabsContent>
+      <div className="flex min-h-screen flex-1 flex-col">
+        {/* Header */}
+        <HeaderBar
+          user={user}
+          onLogout={logout}
+          onUpdateProfile={updateProfile}
+          title={activeTitle}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+        />
 
-          {/* Analytics Tab */}
-          {(user?.role === "support" || user?.role === "admin") && (
-            <TabsContent value="analytics" className="space-y-4">
-              <AnalyticsView
-                analytics={analytics}
-                analyticsPeriod={analyticsPeriod}
-                setAnalyticsPeriod={setAnalyticsPeriod}
-                analyticsFilters={analyticsFilters}
-                setAnalyticsFilters={setAnalyticsFilters}
-                filters={filters}
-                setFilters={setFilters}
-                setActiveTab={setActiveTab}
-                users={users.filter((u) => u.role === "support")}
-              />
-            </TabsContent>
-          )}
+        {/* Main Content */}
+        <main className="flex-1 px-4 py-6 lg:px-6">
+          <div className="mx-auto max-w-none">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              {/* Requests Tab */}
+              <TabsContent value="requests" className="space-y-4">
+                <RequestsView
+                  user={user}
+                  users={users}
+                  requests={requests}
+                  filters={filters}
+                  setFilters={setFilters}
+                  departments={departments}
+                  requestDialog={requestDialog}
+                  setRequestDialog={setRequestDialog}
+                  newRequest={newRequest}
+                  setNewRequest={setNewRequest}
+                  createRequest={createRequest}
+                  deleteRequest={deleteRequest}
+                  page={page}
+                  setPage={setPage}
+                  pageSize={pageSize}
+                  setPageSize={setPageSize}
+                  total={total}
+                  totalPages={totalPages}
+                  pageInfo={pageInfo}
+                  setClassifyDialogFor={setClassifyDialogFor}
+                  setClassifyData={setClassifyData}
+                  setAssignDialogFor={setAssignDialogFor}
+                  setAssignData={setAssignData}
+                  setFeedbackDialogFor={setFeedbackDialogFor}
+                  setFeedbackData={setFeedbackData}
+                  takeRequest={takeRequest}
+                  rejectRequest={rejectRequest}
+                  sendToReview={sendToReview}
+                  backToProgress={backToProgress}
+                  finishRequest={finishRequest}
+                />
+              </TabsContent>
 
-          {/* Users Tab (Admin only) */}
-          {(user?.role === "support" || user?.role === "admin") && (
-            <TabsContent value="users" className="space-y-4">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-gray-900">
-                  Gestión de Usuarios
-                </h2>
-                <Dialog open={userDialog} onOpenChange={setUserDialog}>
-                  <DialogTrigger asChild>
-                    <Button className="flex items-center space-x-2">
-                      <Plus className="h-4 w-4" />
-                      <span>Nuevo Usuario</span>
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Crear Nuevo Usuario</DialogTitle>
-                    </DialogHeader>
-                    <form onSubmit={createUser} className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="username">Usuario</Label>
-                          <Input
-                            id="username"
-                            value={newUser.username}
-                            onChange={(e) =>
-                              setNewUser({
-                                ...newUser,
-                                username: e.target.value,
-                              })
-                            }
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="password">Contraseña</Label>
-                          <Input
-                            id="password"
-                            type="password"
-                            value={newUser.password}
-                            onChange={(e) =>
-                              setNewUser({
-                                ...newUser,
-                                password: e.target.value,
-                              })
-                            }
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="full_name">Nombre Completo</Label>
-                        <Input
-                          id="full_name"
-                          value={newUser.full_name}
-                          onChange={(e) =>
-                            setNewUser({
-                              ...newUser,
-                              full_name: e.target.value,
-                            })
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Departamento</Label>
-                          <Select
-                            value={newUser.department}
-                            onValueChange={(value) =>
-                              setNewUser({ ...newUser, department: value })
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Seleccionar..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {departments?.map((dept) => (
-                                <SelectItem key={dept.id} value={dept.name}>
-                                  {dept.name}
+              {/* Analytics Tab */}
+              {(user?.role === "support" || user?.role === "admin") && (
+                <TabsContent value="analytics" className="space-y-4">
+                  <AnalyticsView
+                    analytics={analytics}
+                    analyticsPeriod={analyticsPeriod}
+                    setAnalyticsPeriod={setAnalyticsPeriod}
+                    analyticsFilters={analyticsFilters}
+                    setAnalyticsFilters={setAnalyticsFilters}
+                    filters={filters}
+                    setFilters={setFilters}
+                    users={users.filter((u) => u.role === "support")}
+                  />
+                </TabsContent>
+              )}
+
+              {/* Users Tab (Support/Admin) */}
+              {(user?.role === "support" || user?.role === "admin") && (
+                <TabsContent value="users" className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                      Gestión de Usuarios
+                    </h2>
+                    <Dialog open={userDialog} onOpenChange={setUserDialog}>
+                      <DialogTrigger asChild>
+                        <Button className="flex items-center space-x-2">
+                          <Plus className="h-4 w-4" />
+                          <span>Nuevo Usuario</span>
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Crear Nuevo Usuario</DialogTitle>
+                        </DialogHeader>
+                        <form onSubmit={createUser} className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="username">Usuario</Label>
+                              <Input
+                                id="username"
+                                value={newUser.username}
+                                onChange={(e) =>
+                                  setNewUser({
+                                    ...newUser,
+                                    username: e.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="password">Contraseña</Label>
+                              <Input
+                                id="password"
+                                type="password"
+                                value={newUser.password}
+                                onChange={(e) =>
+                                  setNewUser({
+                                    ...newUser,
+                                    password: e.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="full_name">Nombre Completo</Label>
+                            <Input
+                              id="full_name"
+                              value={newUser.full_name}
+                              onChange={(e) =>
+                                setNewUser({
+                                  ...newUser,
+                                  full_name: e.target.value,
+                                })
+                              }
+                              required
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Departamento</Label>
+
+                              {newUser.position === "Jefe de departamento" ? (
+                                <div className="max-h-52 w-full overflow-y-auto p-3 border border-slate-200 dark:border-slate-800 bg-white/5 dark:bg-slate-900/60 rounded-md">
+                                  <div className="flex flex-col gap-2">
+                                    {departments?.map((dept) => {
+                                      const checked = (
+                                        newUser.departments || []
+                                      ).includes(dept.name);
+                                      return (
+                                        <label
+                                          key={dept.id}
+                                          className="flex items-start gap-3 py-2 px-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer select-none"
+                                          title={dept.description || dept.name}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="mt-1 h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                                            checked={checked}
+                                            onChange={(e) => {
+                                              const current =
+                                                newUser.departments || [];
+                                              const next = e.target.checked
+                                                ? [...current, dept.name]
+                                                : current.filter(
+                                                    (d) => d !== dept.name,
+                                                  );
+                                              setNewUser({
+                                                ...newUser,
+                                                departments: next,
+                                                department: next[0] || "",
+                                              });
+                                            }}
+                                            aria-label={`Seleccionar ${dept.name}`}
+                                          />
+                                          <div className="text-sm">
+                                            <div className="font-medium leading-5">
+                                              {dept.name}
+                                            </div>
+                                            {dept.description && (
+                                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                {dept.description}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : (
+                                // Single select (para Especialista, etc.)
+                                <Select
+                                  value={newUser.department}
+                                  onValueChange={(value) => {
+                                    setNewUser({
+                                      ...newUser,
+                                      department: value,
+                                      departments: value ? [value] : [],
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Seleccionar..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {departments?.map((dept) => (
+                                      <SelectItem
+                                        key={dept.id}
+                                        value={dept.name}
+                                      >
+                                        {dept.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Puesto</Label>
+                              <Select
+                                value={newUser.position}
+                                onValueChange={(value) => {
+                                  let nextDepartments =
+                                    newUser.departments || [];
+                                  if (value !== "Jefe de departamento") {
+                                    // si no es jefe, conservar solo el primer departamento (o vaciar si prefieres)
+                                    nextDepartments = nextDepartments.length
+                                      ? [nextDepartments[0]]
+                                      : [];
+                                  }
+                                  setNewUser({
+                                    ...newUser,
+                                    position: value,
+                                    departments: nextDepartments,
+                                    department: nextDepartments[0] || "",
+                                  });
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Jefe de departamento">
+                                    Jefe de departamento
+                                  </SelectItem>
+                                  <SelectItem value="Especialista">
+                                    Especialista
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Rol</Label>
+                            <Select
+                              value={newUser.role}
+                              onValueChange={(value) =>
+                                setNewUser({ ...newUser, role: value })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="employee">
+                                  Empleado
                                 </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Puesto</Label>
-                          <Select
-                            value={newUser.position}
-                            onValueChange={(value) =>
-                              setNewUser({ ...newUser, position: value })
+                                <SelectItem value="support">
+                                  Soporte Técnico
+                                </SelectItem>
+                                <SelectItem value="admin">
+                                  Administrador
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Button type="submit" className="w-full">
+                            Crear Usuario
+                          </Button>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  {/* Pasamos la nueva prop onEditUser */}
+                  <UsersView
+                    users={users}
+                    onDeleteUser={deleteUser}
+                    onEditUser={openEditUser}
+                  />
+                </TabsContent>
+              )}
+
+              {/* Users Tab (Department Manager) */}
+              {isDepartmentManager && (
+                <TabsContent value="users" className="space-y-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                        Usuarios del Departamento
+                      </h2>
+                      <p className="text-sm text-gray-500 dark:text-slate-300">
+                        Visualiza y administra usuarios de tu área.
+                      </p>
+                    </div>
+                    <Dialog
+                      open={departmentUserDialog}
+                      onOpenChange={setDepartmentUserDialog}
+                    >
+                      <DialogTrigger asChild>
+                        <Button className="flex items-center space-x-2">
+                          <UserPlus className="h-4 w-4" />
+                          <span>Crear usuario</span>
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>
+                            Crear usuario del departamento
+                          </DialogTitle>
+                          <DialogDescription>
+                            Solo podrás crear usuarios para tu departamento.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <form
+                          onSubmit={createDepartmentUser}
+                          className="space-y-4"
+                        >
+                          <div className="space-y-2">
+                            <Label htmlFor="dept_full_name">
+                              Nombre completo
+                            </Label>
+                            <Input
+                              id="dept_full_name"
+                              value={departmentUserForm.full_name}
+                              onChange={(event) =>
+                                setDepartmentUserForm({
+                                  ...departmentUserForm,
+                                  full_name: event.target.value,
+                                })
+                              }
+                              required
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="dept_email">Correo</Label>
+                            <Input
+                              id="dept_email"
+                              type="email"
+                              value={departmentUserForm.email}
+                              onChange={(event) =>
+                                setDepartmentUserForm({
+                                  ...departmentUserForm,
+                                  email: event.target.value,
+                                })
+                              }
+                              required
+                            />
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <Label>Rol</Label>
+                              <Select
+                                value={departmentUserForm.role}
+                                onValueChange={(value) =>
+                                  setDepartmentUserForm({
+                                    ...departmentUserForm,
+                                    role: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="employee">
+                                    Empleado
+                                  </SelectItem>
+                                  <SelectItem value="support">
+                                    Soporte Técnico
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Estado</Label>
+                              <Select
+                                value={departmentUserForm.status}
+                                onValueChange={(value) =>
+                                  setDepartmentUserForm({
+                                    ...departmentUserForm,
+                                    status: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="active">Activo</SelectItem>
+                                  <SelectItem value="inactive">
+                                    Inactivo
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Departamento</Label>
+                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                              {departmentContext.departmentName ||
+                                departmentContext.departmentId ||
+                                "Sin información"}
+                            </div>
+                          </div>
+                          <Button
+                            type="submit"
+                            className="w-full"
+                            disabled={
+                              !departmentContext.departmentId &&
+                              !departmentContext.departmentName
                             }
                           >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Jefe de departamento">
-                                Jefe de departamento
-                              </SelectItem>
-                              <SelectItem value="Especialista">
-                                Especialista
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
+                            Crear usuario
+                          </Button>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  {!departmentContext.departmentId &&
+                    !departmentContext.departmentName && (
+                      <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                        <AlertTriangle className="mt-0.5 h-4 w-4" />
+                        <div>
+                          <p className="font-medium">
+                            No se pudo determinar el departamento del usuario.
+                          </p>
+                          <p className="text-xs text-amber-900/80 dark:text-amber-100/80">
+                            Los datos se mostrarán sin filtro hasta que se
+                            defina el departamento.
+                          </p>
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Rol</Label>
-                        <Select
-                          value={newUser.role}
-                          onValueChange={(value) =>
-                            setNewUser({ ...newUser, role: value })
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="employee">Empleado</SelectItem>
-                            <SelectItem value="support">
-                              Soporte Técnico
-                            </SelectItem>
-                            <SelectItem value="admin">Administrador</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button type="submit" className="w-full">
-                        Crear Usuario
-                      </Button>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </div>
+                    )}
 
-              {/* Pasamos la nueva prop onEditUser */}
-              <UsersView
-                users={users}
-                onDeleteUser={deleteUser}
-                onEditUser={openEditUser}
-              />
-            </TabsContent>
-          )}
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription>Total usuarios</CardDescription>
+                        <CardTitle className="text-3xl">
+                          {departmentStats.total}
+                        </CardTitle>
+                      </CardHeader>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription>Activos</CardDescription>
+                        <CardTitle className="text-3xl">
+                          {departmentStats.active}
+                        </CardTitle>
+                      </CardHeader>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription>Inactivos</CardDescription>
+                        <CardTitle className="text-3xl">
+                          {departmentStats.inactive}
+                        </CardTitle>
+                      </CardHeader>
+                    </Card>
+                    {departmentStats.hasCreatedAt && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardDescription>Nuevos (7 días)</CardDescription>
+                          <CardTitle className="text-3xl">
+                            {departmentStats.recent}
+                          </CardTitle>
+                        </CardHeader>
+                      </Card>
+                    )}
+                  </div>
 
-          {/* Departments Tab (Admin only) */}
-          {(user?.role === "support" || user?.role === "admin") && (
-            <TabsContent value="departments" className="space-y-4">
-              <DepartmentsView departments={departments} users={users} />
-            </TabsContent>
-          )}
+                  <UsersView
+                    users={departmentUsers}
+                    onDeleteUser={deleteUser}
+                    onEditUser={openEditUser}
+                  />
+                </TabsContent>
+              )}
 
-          {/* Trash Tab(Admin only) */}
-          {(user?.role === "support" || user?.role === "admin") && (
-            <TabsContent value="trash" className="space-y-4">
-              <h2 className="text-2xl font-bold text-gray-900">Papelera</h2>
-              <TrashView api={api} />
-            </TabsContent>
-          )}
-        </Tabs>
-      </main>
+              {/* Departments Tab (Admin only) */}
+              {(user?.role === "support" || user?.role === "admin") && (
+                <TabsContent value="departments" className="space-y-4">
+                  <DepartmentsView departments={departments} users={users} />
+                </TabsContent>
+              )}
+
+              {/* Trash Tab(Admin only) */}
+              {(user?.role === "support" || user?.role === "admin") && (
+                <TabsContent value="trash" className="space-y-4">
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                    Papelera
+                  </h2>
+                  <TrashView api={api} />
+                </TabsContent>
+              )}
+            </Tabs>
+          </div>
+        </main>
+      </div>
 
       {/* === Dialog: Editar Usuario (nuevo) === */}
       <Dialog
         open={editUserDialog}
-        onOpenChange={(open) => !open && setEditUserDialog(false)}
+        onOpenChange={(open) => {
+          setEditUserDialog(open);
+          if (!open) {
+            setEditUser(null); // limpia el formulario al cerrar
+          }
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -1329,14 +1975,37 @@ function App() {
                   full_name: editUser.full_name,
                 };
 
+                // username editable
+                if (editUser.username && editUser.username.trim() !== "") {
+                  payload.username = editUser.username.trim();
+                }
+
+                // password opcional
                 if (editUser.password && editUser.password.trim() !== "") {
                   payload.password = editUser.password;
                 }
 
-                updateUser(editUser.id, payload).then(() => {
-                  setEditUserDialog(false);
-                  setEditUser(null);
-                });
+                // role/position
+                if (editUser.role) payload.role = editUser.role;
+                if (editUser.position) payload.position = editUser.position;
+
+                // department: enviar siempre como array
+                payload.department =
+                  Array.isArray(editUser.departments) &&
+                  editUser.departments.length
+                    ? editUser.departments
+                    : editUser.department
+                      ? [editUser.department]
+                      : [];
+
+                updateUser(editUser.id, payload)
+                  .then(() => {
+                    setEditUserDialog(false);
+                    setEditUser(null);
+                  })
+                  .catch(() => {
+                    // deja el diálogo abierto para que el usuario corrija
+                  });
               }}
               className="space-y-4"
             >
@@ -1379,31 +2048,95 @@ function App() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Departamento</Label>
-                  <Select
-                    value={editUser.department || ""}
-                    onValueChange={(value) =>
-                      setEditUser({ ...editUser, department: value })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.name}>
-                          {dept.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+                  {editUser.position === "Jefe de departamento" ? (
+                    <div className="max-h-52 w-full overflow-y-auto p-3 border border-slate-200 dark:border-slate-800 bg-white/5 dark:bg-slate-900/60 rounded-md">
+                      <div className="flex flex-col gap-2">
+                        {departments?.map((dept) => {
+                          const checked = (editUser.departments || []).includes(
+                            dept.name,
+                          );
+                          return (
+                            <label
+                              key={dept.id}
+                              className="flex items-start gap-3 py-2 px-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer select-none"
+                              title={dept.description || dept.name}
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const current = editUser.departments || [];
+                                  const next = e.target.checked
+                                    ? [...current, dept.name]
+                                    : current.filter((d) => d !== dept.name);
+                                  setEditUser({
+                                    ...editUser,
+                                    departments: next,
+                                    department: next[0] || "",
+                                  });
+                                }}
+                                aria-label={`Seleccionar ${dept.name}`}
+                              />
+                              <div className="text-sm">
+                                <div className="font-medium leading-5">
+                                  {dept.name}
+                                </div>
+                                {dept.description && (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                                    {dept.description}
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <Select
+                      value={editUser.department || ""}
+                      onValueChange={(value) =>
+                        setEditUser({
+                          ...editUser,
+                          department: value,
+                          departments: value ? [value] : [],
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {departments?.map((dept) => (
+                          <SelectItem key={dept.id} value={dept.name}>
+                            {dept.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
+
                 <div className="space-y-2">
                   <Label>Puesto</Label>
                   <Select
                     value={editUser.position || "Especialista"}
-                    onValueChange={(value) =>
-                      setEditUser({ ...editUser, position: value })
-                    }
+                    onValueChange={(value) => {
+                      let nextDepartments = editUser.departments || [];
+                      if (value !== "Jefe de departamento") {
+                        nextDepartments = nextDepartments.length
+                          ? [nextDepartments[0]]
+                          : [];
+                      }
+                      setEditUser({
+                        ...editUser,
+                        position: value,
+                        departments: nextDepartments,
+                        department: nextDepartments[0] || "",
+                      });
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -1417,6 +2150,7 @@ function App() {
                   </Select>
                 </div>
               </div>
+
               <div className="space-y-2">
                 <Label>Rol</Label>
                 <Select
@@ -1437,11 +2171,16 @@ function App() {
               </div>
               <div className="flex justify-end gap-2">
                 <Button
+                  type="button"
                   variant="outline"
-                  onClick={() => setEditUserDialog(false)}
+                  onClick={() => {
+                    setEditUserDialog(false);
+                    setEditUser(null);
+                  }}
                 >
                   Cancelar
                 </Button>
+
                 <Button type="submit">Guardar cambios</Button>
               </div>
             </form>
@@ -1503,6 +2242,7 @@ function App() {
           </div>
           <div className="flex justify-end gap-2">
             <Button
+              type="button"
               variant="outline"
               onClick={() => setClassifyDialogFor(null)}
             >
@@ -1587,6 +2327,7 @@ function App() {
 
           <div className="flex justify-end gap-2">
             <Button
+              type="button"
               variant="outline"
               onClick={() => setFeedbackDialogFor(null)}
             >
@@ -1632,6 +2373,7 @@ function App() {
           </div>
           <div className="flex justify-end gap-2">
             <Button
+              type="button"
               variant="outline"
               onClick={() =>
                 setRejectDialog({ open: false, id: null, reason: "" })
@@ -1670,6 +2412,7 @@ function App() {
           </div>
           <div className="flex justify-end gap-2">
             <Button
+              type="button"
               variant="outline"
               onClick={() =>
                 setReviewDialog({ open: false, id: null, link: "" })

@@ -4,7 +4,7 @@ import { FileText, BarChart3, Users, Building, Trash2 } from "lucide-react";
 
 const NavigationTabs = ({ user }) => {
   return (
-    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 rounded-lg shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
         <TabsList className="flex min-w-full flex-nowrap gap-2 px-2 py-2 sm:px-4 sm:py-3 justify-start">
           <TabsTrigger

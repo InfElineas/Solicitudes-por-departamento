@@ -1,7 +1,7 @@
 // src/api/client.js
 import axios from "axios";
 import { toast } from "sonner";
-import { notifyAuthExpired } from "@/utils/session";
+import { getStoredToken, notifyAuthExpired } from "@/utils/session";
 
 const BASE = (
   process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"
@@ -13,7 +13,7 @@ const api = axios.create({
 
 // Adjunta token si existe
 api.interceptors.request.use((config) => {
-  const t = localStorage.getItem("token");
+  const t = getStoredToken();
   if (t) config.headers.Authorization = `Bearer ${t}`;
   return config;
 });

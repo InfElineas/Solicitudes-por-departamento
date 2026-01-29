@@ -21,14 +21,19 @@ function RequireRole({ roles }) {
 function AppLayout() {
   const { user, logout } = useAuth();
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       {HeaderBar ? (
         <HeaderBar user={user} onLogout={logout} />
       ) : (
-        <header className="bg-white shadow-sm border-b">
+        <header className="bg-white/80 dark:bg-slate-950/80 shadow-sm border-b border-slate-200/60 dark:border-slate-800 backdrop-blur">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div className="text-lg font-semibold">Sistema de Solicitudes</div>
-            <button className="text-sm text-gray-600" onClick={logout}>
+            <div className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+              Sistema de Solicitudes
+            </div>
+            <button
+              className="text-sm text-gray-600 dark:text-slate-300"
+              onClick={logout}
+            >
               Salir
             </button>
           </div>

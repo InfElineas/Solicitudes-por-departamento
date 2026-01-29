@@ -23,7 +23,7 @@ from app.api.routes import config as config_routes
 from app.core.app_config_service import get_app_config, upsert_app_config
 from app.core.app_config_schema import AppConfig, Department as ConfigDepartment, RequestOptions
 
-
+from typing import Union
 
 
 # Rate limiting (SlowAPI)
@@ -71,7 +71,7 @@ class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     username: str
     full_name: str
-    department: str
+    department: List[str]               # ahora lista
     position: str  # "Jefe de departamento" | "Especialista"
     role: str      # "admin" | "support" | "employee"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -80,7 +80,7 @@ class UserCreate(BaseModel):
     username: str
     password: str
     full_name: str
-    department: str
+    department: Union[str, List[str]]   # acepta string o lista
     position: str
     role: str
 
@@ -198,6 +198,33 @@ class PaginatedRequests(BaseModel):
 # ============================
 #       Helper functions
 # ============================
+def normalize_departments(value: Any) -> List[str]:
+    """Convierte string|list|None -> lista de strings (sin elementos vacíos)."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if v is not None and str(v).strip() != ""]
+    s = str(value).strip()
+    return [s] if s != "" else []
+
+def load_user_from_doc(doc: Dict[str, Any]) -> User:
+    """
+    Convierte doc DB (posible department string) a User (department siempre lista).
+    Útil para evitar errores al leer datos antiguos.
+    """
+    d = dict(doc)
+    if "department" not in d or d["department"] is None:
+        d["department"] = []
+    elif isinstance(d["department"], str):
+        d["department"] = [d["department"].strip()] if d["department"].strip() != "" else []
+    elif isinstance(d["department"], list):
+        d["department"] = [str(x).strip() for x in d["department"] if str(x).strip() != ""]
+    else:
+        # casos raros
+        d["department"] = [str(d["department"])]
+    return User(**d)
+
+
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -223,7 +250,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user = await db.users.find_one({"username": username})
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
-    return User(**user)
+    return load_user_from_doc(user)
 
 def require_role(required_roles: List[str]):
     async def role_checker(current_user: User = Depends(get_current_user)):
@@ -494,6 +521,30 @@ async def migrate_requests_schema() -> None:
     for k, v in STATUS_SYNONYMS.items():
         await db.requests.update_many({"status": k}, {"$set": {"status": v}})
 
+async def migrate_users_department_schema() -> None:
+    """
+    Convierte usuarios con department:string -> department:[string].
+    Idempotente.
+    """
+    # Strings -> arrays
+    await db.users.update_many(
+        {"department": {"$type": "string"}},
+        [{"$set": {"department": [{"$trim": {"input": "$department"}}]}}]  # pipeline update (Mongo 4.2+)
+    )
+    # Null/No existe -> []
+    await db.users.update_many(
+        {"$or": [{"department": {"$exists": False}}, {"department": None}]},
+        {"$set": {"department": []}}
+    )
+    # Limpieza: arrays con elementos vacíos -> remover vacíos
+    users = await db.users.find({"department": {"$type": "array"}}).to_list(1000)
+    for u in users:
+        cleaned = [str(x).strip() for x in u.get("department", []) if str(x).strip() != ""]
+        # sólo actualizar si cambia
+        if cleaned != u.get("department", []):
+            await db.users.update_one({"id": u["id"]}, {"$set": {"department": cleaned}})
+
+
 async def record_failed_login(username: str, ip: str, window_min: int):
     now = datetime.now(timezone.utc)
     await db.failed_logins.insert_one({
@@ -546,8 +597,7 @@ async def init_data():
     # Users
     users_data = [
         {"username": "admin", "password": "admin123", "full_name": "Administrador Sistema",
-         "department": "Directivos", "position": "Jefe de departamento", "role": "admin"},
-        
+         "department": ["Directivos"], "position": "Jefe de departamento", "role": "admin"},       
     ]
     username_to_doc: Dict[str, dict] = {}
     for u in users_data:
@@ -635,20 +685,35 @@ async def create_user(user: UserCreate, current_user: User = Depends(require_rol
     existing_user = await db.users.find_one({"username": user.username})
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
+
     user_dict = user.dict()
     password_hash = get_password_hash(user_dict.pop("password"))
+
+    # Normalizar department a lista
+    departments = normalize_departments(user_dict.get("department"))
+    # Validación de negocio: si no es Jefe no permitir más de 1 departamento
+    if user_dict.get("position") != "Jefe de departamento" and len(departments) > 1:
+        raise HTTPException(status_code=400, detail="Solo los 'Jefe de departamento' pueden tener varios departamentos")
+
+    # Si quieres obligar al menos 1 departamento para todos:
+    # if len(departments) == 0:
+    #     raise HTTPException(status_code=400, detail="Usuario debe tener al menos un departamento")
+
+    user_dict["department"] = departments
+
     new_user = User(**user_dict)
     user_doc = new_user.dict()
     user_doc["password_hash"] = password_hash
     await db.users.insert_one(user_doc)
     return new_user
 
+
 from pydantic import BaseModel
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     full_name: Optional[str] = None
-    department: Optional[str] = None
+    department: Optional[Union[str, List[str]]] = None
     position: Optional[str] = None
     role: Optional[str] = None
     password: Optional[str] = None 
@@ -680,13 +745,13 @@ async def update_my_profile(
     )
 
     updated = await db.users.find_one({"id": current_user.id})
-    return User(**updated)
+    return load_user_from_doc(updated)
 
 
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(get_current_user)):
     users = await db.users.find().to_list(1000)
-    return [User(**user) for user in users]
+    return [load_user_from_doc(user) for user in users]
 
 @api_router.patch("/users/{user_id}", response_model=User)
 async def update_user(
@@ -699,6 +764,16 @@ async def update_user(
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     update_data = payload.dict(exclude_unset=True)
+        
+    # Normalizar department (si viene)
+
+    if "department" in update_data:
+        update_data["department"] = normalize_departments(update_data["department"])
+        # Determinar la posición válida (si viene en payload, usarla; si no, usar la actual en user_doc)
+        position = update_data.get("position") or user_doc.get("position")
+        if position != "Jefe de departamento" and len(update_data["department"]) > 1:
+            raise HTTPException(status_code=400, detail="Solo los 'Jefe de departamento' pueden tener varios departamentos")
+
 
     # Si se envió password, reemplazar por password_hash
     if "password" in update_data:
@@ -722,7 +797,8 @@ async def update_user(
 
     await db.users.update_one({"id": user_id}, {"$set": update_data})
     updated = await db.users.find_one({"id": user_id})
-    return User(**updated)
+    return load_user_from_doc(updated)
+
 
 
 # ---- Departments ----
