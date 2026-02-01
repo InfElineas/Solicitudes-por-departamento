@@ -389,8 +389,29 @@ function App() {
     clearStoredToken();
     setActiveTab("requests");
     setAuthChecked(true);
-    if (message) toast.error(message);
-    else toast.success("Sesión cerrada");
+
+    // Decidir si el `message` es realmente informativo
+    if (isMeaningfulMessage(message)) {
+      // Si message viene como objeto, convertirlo a html legible
+      const messageHtml =
+        typeof message === "string"
+          ? translateIfEnglishAuth(message)
+          : getErrorMessage({ response: { data: message } }, String(message));
+
+      // sesión finalizada con detalle -> modal con botón
+      showAuthAlert("Hasta pronto", "Has cerrado sesión correctamente.", {
+        icon: "success",
+        timer: 2000,
+        allowOutsideClick: true,
+      });
+    } else {
+      // cierre manual -> alerta transitoria, cordial y sin botón
+      showAuthAlert("Hasta pronto", "Has cerrado sesión correctamente.", {
+        icon: "success",
+        timer: 2000,
+        allowOutsideClick: true,
+      });
+    }
   }, []);
 
   /* ===========================
@@ -475,9 +496,11 @@ function App() {
     } catch (error) {
       console.error("Error fetching user:", error);
       if (!isUnauthorized(error)) {
-        toast.error(
+        const message = getErrorMessage(
+          error,
           "No se pudo validar tu sesión. Verifica la conexión y reintenta.",
         );
+        await showAuthAlert("No se pudo validar la sesión", message, "error");
       }
     }
     setAuthChecked(true);
@@ -621,11 +644,44 @@ function App() {
       }
       setToken(accessToken);
       setAuthChecked(true);
+
+      // SweetAlert transitoria de éxito (si quieres más cordial: incluir el nombre)
+      const displayName = (
+        userFromLogin?.full_name ||
+        userFromLogin?.username ||
+        ""
+      ).trim();
+      const welcome = displayName
+        ? `¡Bienvenido, ${displayName}!`
+        : "¡Bienvenido!";
+      // mostrar 1.5s y sin botón
+      await showAuthAlert(welcome, "Has iniciado sesión correctamente.", {
+        icon: "success",
+        timer: 1500,
+      });
+
+      // fallback toast
       toast.success("¡Bienvenido!");
     } catch (error) {
       console.error("Login error:", error);
       clearStoredToken();
-      toast.error(error?.response?.data?.detail || "Credenciales incorrectas");
+
+      // Extraer mensaje en html legible
+      const messageHtml = getErrorMessage(error, "No se pudo iniciar sesión");
+
+      // Si es 401 -> credenciales inválidas (traducido por getErrorMessage)
+      if (error?.response?.status === 401) {
+        await showAuthAlert("Credenciales inválidas", messageHtml, {
+          icon: "error",
+          showConfirmButton: true,
+        });
+      } else {
+        // Network / timeout / otros -> alerta
+        await showAuthAlert("Error al iniciar sesión", messageHtml, {
+          icon: "error",
+          showConfirmButton: true,
+        });
+      }
     }
     setLoading(false);
   };
@@ -1012,6 +1068,182 @@ function App() {
         return "bg-green-100 text-green-800 dark:bg-emerald-500/20 dark:text-emerald-200";
       default:
         return "bg-gray-100 text-gray-800 dark:bg-slate-700/40 dark:text-slate-200";
+    }
+  };
+
+  /* ===========================
+   Helpers para errores auth
+   =========================== */
+
+  /**
+   * Convierte objetos/arrays en HTML legible para Swal (listas / pares key:value).
+   */
+  const formatErrorContentToHtml = (value) => {
+    try {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "string") return value.replace(/\n/g, "<br/>");
+      if (Array.isArray(value)) {
+        const items = value
+          .map(
+            (it) =>
+              `<li style="text-align:left;margin:4px 0">${String(it)}</li>`,
+          )
+          .join("");
+        return `<ul style="text-align:left;padding-left:18px;margin:0">${items}</ul>`;
+      }
+      if (typeof value === "object") {
+        const rows = Object.entries(value)
+          .map(
+            ([k, v]) =>
+              `<div style="text-align:left;margin:6px 0"><strong>${k}:</strong> ${Array.isArray(v) ? formatErrorContentToHtml(v) : String(v)}</div>`,
+          )
+          .join("");
+        return rows || JSON.stringify(value);
+      }
+      return String(value);
+    } catch (e) {
+      return String(value);
+    }
+  };
+
+  /**
+   * Traduce frases comunes de errores de auth en inglés al español.
+   */
+  const translateIfEnglishAuth = (msg) => {
+    if (!msg || typeof msg !== "string") return msg;
+    const m = msg.trim();
+    const map = {
+      "Incorrect username or password": "Usuario o contraseña incorrectos",
+      "Incorrect username or password.": "Usuario o contraseña incorrectos",
+      "Invalid credentials": "Credenciales inválidas",
+      "Invalid username or password": "Usuario o contraseña incorrectos",
+      Unauthorized: "No autorizado",
+      "Unauthorized.": "No autorizado",
+    };
+    return map[m] || msg;
+  };
+
+  /**
+   * Extrae un mensaje razonable desde un error de Axios (o fallback).
+   */
+  const getErrorMessage = (error, fallback = "Ocurrió un error") => {
+    try {
+      if (!error) return fallback;
+
+      // Sin response -> timeout / network
+      if (!error.response) {
+        if (error.code === "ECONNABORTED")
+          return "Tiempo de espera agotado al conectar con el servidor.";
+        if (
+          String(error.message || "")
+            .toLowerCase()
+            .includes("network error")
+        )
+          return "No hay conexión con el servidor. Revisa tu red.";
+        return "No se pudo conectar con el servidor. Revisa tu conexión.";
+      }
+
+      // Con response -> priorizar response.data.detail / message / errors
+      const data = error.response.data;
+      if (!data) {
+        if (error.response.status) {
+          return `Error ${error.response.status}: ${error.response.statusText || ""}`;
+        }
+        return fallback;
+      }
+
+      // Si data es string
+      if (typeof data === "string") {
+        const translated = translateIfEnglishAuth(data);
+        return formatErrorContentToHtml(translated);
+      }
+
+      // Si existe detail o message
+      const primary = data.detail ?? data.message ?? data.error ?? null;
+      if (primary) {
+        // primary puede ser objeto/array/string
+        const maybeTranslated =
+          typeof primary === "string"
+            ? translateIfEnglishAuth(primary)
+            : primary;
+        return formatErrorContentToHtml(maybeTranslated);
+      }
+
+      // Si hay 'errors' (objetos con listas)
+      if (data.errors) return formatErrorContentToHtml(data.errors);
+
+      // Si data es un objeto con info -> stringify legible
+      return formatErrorContentToHtml(data);
+    } catch (e) {
+      return fallback;
+    }
+  };
+
+  /**
+   * Determina si `message` tiene contenido "significativo" que mostrar.
+   * Ignora numbers simples, true/false, empty string y objetos vacíos.
+   */
+  const isMeaningfulMessage = (msg) => {
+    if (msg === undefined || msg === null) return false;
+    if (typeof msg === "string") return msg.trim().length > 0;
+    if (typeof msg === "number") return false; // evita mostrar '1' accidental
+    if (typeof msg === "boolean") return false;
+    if (msg instanceof Error) return !!msg.message;
+    if (typeof msg === "object") {
+      // si viene un axios error-like { response: { data: ... } }
+      if (msg.response && msg.response.data) {
+        const d = msg.response.data;
+        if (typeof d === "string") return d.trim().length > 0;
+        if (typeof d === "object") return Object.keys(d).length > 0;
+        return true;
+      }
+      // objeto normal: solo si tiene keys
+      return Object.keys(msg).length > 0;
+    }
+    return false;
+  };
+
+  /**
+   * Mostrar SweetAlert estilizado para errores de autenticación / sesión.
+   */
+  /**
+   * Mostrar SweetAlert genérico con opciones:
+   * opts: { icon, timer, showConfirmButton }
+   * - si timer se pasa, la alerta se cerrará automáticamente (transitoria)
+   */
+  const showAuthAlert = async (title, messageHtmlOrText, opts = {}) => {
+    try {
+      const {
+        icon = "error",
+        timer = null,
+        showConfirmButton = true,
+        allowOutsideClick = false,
+      } = opts;
+
+      const config = {
+        title,
+        // wrapper centrado por defecto; contenido complejo puede traer su propio left
+        html: `<div style="text-align:center">${messageHtmlOrText || ""}</div>`,
+        icon,
+        showConfirmButton,
+        allowOutsideClick,
+      };
+
+      if (timer && Number.isFinite(timer)) {
+        config.timer = timer;
+        config.timerProgressBar = true;
+        config.showConfirmButton = false;
+        config.allowOutsideClick = true;
+      }
+
+      await Swal.fire(config);
+    } catch (e) {
+      // fallback a toast con texto plano (quita tags HTML)
+      const plain =
+        (typeof messageHtmlOrText === "string"
+          ? messageHtmlOrText.replace(/<[^>]+>/g, "")
+          : String(messageHtmlOrText)) || "Error";
+      toast.error(plain);
     }
   };
 
