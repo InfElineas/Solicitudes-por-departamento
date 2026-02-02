@@ -67,10 +67,8 @@ const RequestsView = ({
   });
   const [saving, setSaving] = useState(false);
 
-  // Local copy of requests so podemos actualizar la lista sin recargar
   const [localRequests, setLocalRequests] = useState(requests || []);
 
-  // Mantener sincronizado el estado local cuando el prop 'requests' cambie
   useEffect(() => {
     setLocalRequests(requests || []);
   }, [requests]);
@@ -94,21 +92,97 @@ const RequestsView = ({
     return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
   };
 
-  // Abre modal de edición con datos precargados (normalizando formatos)
-  const openEdit = (id, data) => {
-    setEditDialogFor(id);
-    setEditData({
-      title: data?.title || "",
-      description: data?.description || "",
-      type: data?.type || "",
-      channel: data?.channel || "",
-      department: data?.department || "",
-      level: data?.level ?? "",
-      estimated_hours: data?.estimated_hours ?? "",
-      estimated_due: isoToLocalInput(data?.estimated_due) || "",
-      priority: data?.priority || "",
-      assigned_to: data?.assigned_to || "",
-    });
+  const openEdit = async (id, data) => {
+    try {
+      console.log("openEdit called:", { id, hasData: !!data });
+
+      let doc = data;
+      const missingCritical =
+        !doc ||
+        (doc &&
+          (doc.level === undefined ||
+            doc.estimated_hours === undefined ||
+            doc.estimated_due === undefined));
+
+      if (missingCritical) {
+        try {
+          const res = await api.get(`/requests/${id}`);
+          doc = res?.data;
+        } catch (err) {
+          console.error("openEdit: error fetching request detail:", err);
+          Swal.fire({
+            icon: "error",
+            title: "Error",
+            text: "No se pudo obtener la solicitud para editar.",
+          });
+          return;
+        }
+      }
+
+      if (!doc) {
+        Swal.fire({
+          icon: "error",
+          title: "Error",
+          text: "Solicitud no encontrada.",
+        });
+        return;
+      }
+
+      // Normalizar department -> nombre (mantener compatibilidad con tus SelectItems)
+      const resolveDepartmentName = (raw) => {
+        if (!raw && raw !== 0) return "";
+        if (typeof raw === "string") return raw;
+        if (Array.isArray(raw) && raw.length) {
+          const first = raw[0];
+          if (typeof first === "string") return first;
+          if (typeof first === "object") return first.name ?? first.id ?? "";
+          return String(first);
+        }
+        if (typeof raw === "object") {
+          if (raw.name) return raw.name;
+          if (raw.department_name) return raw.department_name;
+          if (raw.id) return String(raw.id);
+        }
+        return "";
+      };
+
+      const normalized = {
+        title: doc?.title ?? "",
+        description: doc?.description ?? "",
+        type: doc?.type ?? "",
+        channel: doc?.channel ?? "",
+        department: resolveDepartmentName(doc?.department),
+        level: doc?.level != null ? String(doc.level) : "",
+        estimated_hours:
+          doc?.estimated_hours != null ? String(doc.estimated_hours) : "",
+        estimated_due: doc?.estimated_due
+          ? (function (iso) {
+              try {
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return "";
+                const pad = (n) => String(n).padStart(2, "0");
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+              } catch {
+                return "";
+              }
+            })(doc.estimated_due)
+          : "",
+        priority: doc?.priority ?? "",
+        assigned_to: doc?.assigned_to ?? "",
+      };
+
+      console.log("openEdit - normalized (parent):", normalized);
+
+      setEditData(normalized);
+      setEditDialogFor(id);
+    } catch (e) {
+      console.error("openEdit unexpected error:", e);
+      Swal.fire({
+        icon: "error",
+        title: "Error",
+        text: "Error inesperado abriendo edición.",
+      });
+    }
   };
 
   // Normaliza el payload a lo que espera el backend (PUT parcial)
@@ -161,19 +235,15 @@ const RequestsView = ({
       // Cerrar modal
       setEditDialogFor(null);
 
-      // Si el padre expone fetchRequests lo usamos (estado fuente de la verdad)
       if (typeof fetchRequests === "function") {
         await fetchRequests();
       } else {
-        // Actualizamos localmente la lista con lo que nos devolvió la API (res.data)
-        // Si la API no devuelve el recurso, podríamos hacer un GET (/requests/:id) — aquí asumimos res.data es el objeto actualizado.
         const updated = res?.data;
         if (updated && updated.id) {
           setLocalRequests((prev) =>
             prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
           );
         } else {
-          // fallback conservador: si no hay res.data, intentar obtener el recurso actualizado
           try {
             const getRes = await api.get(`/requests/${id}`);
             const fresh = getRes?.data;
@@ -183,7 +253,6 @@ const RequestsView = ({
               );
             }
           } catch (e) {
-            // No hacemos reload; solo logueamos y seguimos
             console.warn("No se pudo obtener recurso actualizado:", e);
           }
         }
@@ -340,7 +409,9 @@ const RequestsView = ({
               onView={(id) => setViewDialogFor(id)}
               onEdit={(id, data) => openEdit(id, data)}
               className={
-                viewMode === "list" ? "border-slate-200 dark:border-slate-800" : ""
+                viewMode === "list"
+                  ? "border-slate-200 dark:border-slate-800"
+                  : ""
               }
             />
           ))
@@ -400,7 +471,6 @@ function PaginationControls({
   setPageSize,
   totalPages,
 }) {
-  /* ... tu impl. actual ... */
   return (
     <div
       className={`flex flex-col md:flex-row md:items-center md:justify-between gap-3 ${position === "top" ? "" : "mt-6"}`}
