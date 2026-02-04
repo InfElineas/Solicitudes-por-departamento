@@ -1,7 +1,7 @@
 # app/models/request.py
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any, Literal, Union
 import uuid
 from app.models.common import RequestType, RequestChannel, RequestStatus
 
@@ -30,7 +30,7 @@ class RequestInDB(BaseModel):
     status: RequestStatus = "Pendiente"
     requester_id: str
     requester_name: str
-    department: str
+    department: Union[str, List[str]]
     assigned_to: Optional[str] = None
     assigned_to_name: Optional[str] = None
     estimated_hours: Optional[float] = None
@@ -63,7 +63,7 @@ class RequestUpdate(BaseModel):
     priority: Optional[Literal["Alta", "Media", "Baja"]] = None
     type: Optional[RequestType] = None
     channel: Optional[RequestChannel] = None
-    department: Optional[str] = None
+    department: Optional[Union[str, List[str]]] = None
     status: Optional[RequestStatus] = None
     assigned_to: Optional[str] = None
     estimated_hours: Optional[float] = None

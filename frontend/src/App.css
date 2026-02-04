@@ -292,3 +292,71 @@ body {
   font-weight: 700;
   line-height: 1.2;
 }
+
+/* ============================= */
+/* SweetAlert2 – Light / Dark    */
+/* ============================= */
+
+/* Default (Light) */
+.swal2-popup {
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 12px;
+  box-shadow: 0 6px 30px rgba(7, 10, 25, 0.35);
+}
+
+.swal2-title,
+.swal2-html-container {
+  text-align: center;
+}
+
+/* Buttons */
+.swal2-styled {
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 500;
+}
+
+/* Confirm button */
+.swal2-confirm {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+  border: none !important;
+  color: #ffffff !important;
+}
+
+.swal2-confirm:hover {
+  background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%) !important;
+}
+
+/* Toasts */
+.swal2-toast {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 6px 18px rgba(7, 10, 25, 0.2);
+}
+
+/* ============================= */
+/* Dark mode (html.dark)         */
+/* ============================= */
+
+html.dark .swal2-popup {
+  background: #071025;
+  color: #e6eef8;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 36px rgba(0, 0, 0, 0.6);
+}
+
+html.dark .swal2-title,
+html.dark .swal2-html-container {
+  text-align: center;
+}
+
+html.dark .swal2-confirm {
+  background: linear-gradient(135deg, #7c5cff 0%, #8b5cf6 100%) !important;
+}
+
+html.dark .swal2-toast {
+  background: #071025;
+  color: #e6eef8;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+}

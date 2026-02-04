@@ -1,5 +1,4 @@
-// src/components/requests/CreateRequestDialog.jsx
-import React from "react";
+import React, { useState } from "react";
 import {
   DialogContent,
   DialogHeader,
@@ -17,6 +16,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import Swal from "sweetalert2";
+import "sweetalert2/dist/sweetalert2.min.css";
 
 // Enums unificados con App.js (VALID)
 const CHANNEL_OPTIONS = [
@@ -34,6 +35,7 @@ const CreateRequestDialog = ({
   setNewRequest,
   createRequest,
 }) => {
+  const [submitting, setSubmitting] = useState(false);
   const isAdmin = user?.role === "admin";
 
   // Técnicos disponibles (soporte/admin del depto Informática)
@@ -46,8 +48,10 @@ const CreateRequestDialog = ({
     : [];
 
   // Sanea y envía payload correcto al backend
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+
+    // Armar payload (compatible con la lógica que ya tienes en el padre)
     const payload = {
       title: (newRequest.title || "").trim(),
       description: (newRequest.description || "").trim(),
@@ -57,33 +61,55 @@ const CreateRequestDialog = ({
     };
 
     if (isAdmin) {
-      // level numérico
       if (newRequest.level) payload.level = Number(newRequest.level);
-      // asignado opcional
       if (newRequest.assigned_to) payload.assigned_to = newRequest.assigned_to;
-      // números si vienen
       if (
         newRequest.estimated_hours !== "" &&
         newRequest.estimated_hours != null
       ) {
         payload.estimated_hours = Number(newRequest.estimated_hours);
       }
-      // datetime ISO si viene
       if ((newRequest.estimated_due || "").trim()) {
         payload.estimated_due = newRequest.estimated_due;
       }
     }
 
-    createRequest({ preventDefault: () => {} }); // Para mantener compatibilidad si la prop esperaba evento
-    // Si tu createRequest ya arma su payload, puedes ignorar esto;
-    // si quieres mover la lógica al padre, pasa `payload` como argumento:
-    if (typeof createRequest === "function" && createRequest.length > 0) {
-      // Opcional: si tu createRequest acepta parámetros, pásale el payload:
-      try {
-        createRequest(payload);
-      } catch {}
+    // Evitar reenvíos
+    if (submitting) return;
+
+    setSubmitting(true);
+    try {
+      // Llamamos al handler padre. Si tu createRequest acepta evento lo atrapará,
+      // si acepta payload lo usará. Ambos funcionan con la implementación actual.
+      await Promise.resolve(createRequest(payload));
+      // Mostrar alerta de éxito breve y cordial
+      await Swal.fire({
+        icon: "success",
+        title: "Solicitud creada",
+        text: "Tu solicitud fue creada correctamente. ¡Gracias!",
+        timer: 1300,
+        showConfirmButton: false,
+        position: "center",
+      });
+      // Nota: el padre (createRequest) debería resetear el formulario y cerrar el dialog
+    } catch (err) {
+      // Mostrar error amigable
+      const message =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Error al crear la solicitud";
+      Swal.fire({
+        icon: "error",
+        title: "Error",
+        text: message,
+      });
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  // Handler auxiliar para cambiar campos (inmutable)
+  const setField = (patch) => setNewRequest({ ...newRequest, ...patch });
 
   return (
     <DialogContent>
@@ -101,10 +127,9 @@ const CreateRequestDialog = ({
           <Input
             id="title"
             value={newRequest.title || ""}
-            onChange={(e) =>
-              setNewRequest({ ...newRequest, title: e.target.value })
-            }
+            onChange={(e) => setField({ title: e.target.value })}
             required
+            disabled={submitting}
           />
         </div>
 
@@ -114,11 +139,10 @@ const CreateRequestDialog = ({
           <Textarea
             id="description"
             value={newRequest.description || ""}
-            onChange={(e) =>
-              setNewRequest({ ...newRequest, description: e.target.value })
-            }
+            onChange={(e) => setField({ description: e.target.value })}
             required
             rows={3}
+            disabled={submitting}
           />
         </div>
 
@@ -128,9 +152,8 @@ const CreateRequestDialog = ({
             <Label>Prioridad</Label>
             <Select
               value={newRequest.priority || "Media"}
-              onValueChange={(value) =>
-                setNewRequest({ ...newRequest, priority: value })
-              }
+              onValueChange={(value) => setField({ priority: value })}
+              disabled={submitting}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar" />
@@ -147,9 +170,8 @@ const CreateRequestDialog = ({
             <Label>Tipo de solicitud</Label>
             <Select
               value={newRequest.type || "Soporte"}
-              onValueChange={(value) =>
-                setNewRequest({ ...newRequest, type: value })
-              }
+              onValueChange={(value) => setField({ type: value })}
+              disabled={submitting}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar" />
@@ -168,9 +190,8 @@ const CreateRequestDialog = ({
             <Label>Canal de la solicitud</Label>
             <Select
               value={newRequest.channel || "Sistema"}
-              onValueChange={(value) =>
-                setNewRequest({ ...newRequest, channel: value })
-              }
+              onValueChange={(value) => setField({ channel: value })}
+              disabled={submitting}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Seleccionar" />
@@ -195,9 +216,8 @@ const CreateRequestDialog = ({
                 <Label>Nivel</Label>
                 <Select
                   value={String(newRequest.level || "1")}
-                  onValueChange={(v) =>
-                    setNewRequest({ ...newRequest, level: v })
-                  }
+                  onValueChange={(v) => setField({ level: v })}
+                  disabled={submitting}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar" />
@@ -216,9 +236,8 @@ const CreateRequestDialog = ({
                 <Label>Técnico (opcional)</Label>
                 <Select
                   value={newRequest.assigned_to || ""}
-                  onValueChange={(v) =>
-                    setNewRequest({ ...newRequest, assigned_to: v })
-                  }
+                  onValueChange={(v) => setField({ assigned_to: v })}
+                  disabled={submitting}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar..." />
@@ -247,12 +266,10 @@ const CreateRequestDialog = ({
                   step="0.5"
                   value={newRequest.estimated_hours ?? ""}
                   onChange={(e) =>
-                    setNewRequest({
-                      ...newRequest,
-                      estimated_hours: e.target.value,
-                    })
+                    setField({ estimated_hours: e.target.value })
                   }
                   placeholder="Ej: 4"
+                  disabled={submitting}
                 />
               </div>
 
@@ -261,20 +278,21 @@ const CreateRequestDialog = ({
                 <Input
                   type="datetime-local"
                   value={newRequest.estimated_due || ""}
-                  onChange={(e) =>
-                    setNewRequest({
-                      ...newRequest,
-                      estimated_due: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setField({ estimated_due: e.target.value })}
+                  disabled={submitting}
                 />
               </div>
             </div>
           </>
         )}
 
-        <Button type="submit" className="w-full">
-          Crear Solicitud
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={submitting}
+          aria-busy={submitting}
+        >
+          {submitting ? "Creando solicitud…" : "Crear Solicitud"}
         </Button>
       </form>
     </DialogContent>

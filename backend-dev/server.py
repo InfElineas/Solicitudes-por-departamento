@@ -333,17 +333,6 @@ async def ensure_departments_on_startup():
         logger.exception("Error en ensure_departments_on_startup: %s", e)
 
 
-# def _normalize_request_doc(d: Dict[str, Any]) -> Dict[str, Any]:
-#     out = dict(d)
-#     out.setdefault("type", "Soporte")
-#     out.setdefault("channel", "Sistema")
-#     out.setdefault("status", "Pendiente")
-#     st = out.get("status")
-#     if isinstance(st, str) and st in STATUS_SYNONYMS:
-#         out["status"] = STATUS_SYNONYMS[st]
-#     if out.get("status") not in VALID_STATUSES:
-#         out["status"] = "Pendiente"
-#     return out
 
 def _normalize_request_doc(d: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(d)  # copia defensiva
@@ -842,59 +831,95 @@ async def update_user(
 # ---- Departments ----
 @api_router.get("/departments")
 async def get_departments(current_user: User = Depends(get_current_user)):
-    departments = await db.departments.find().to_list(1000)
-    dept_list = [Department(**dept) for dept in departments]
-    
-    # Si es support o admin, agregar estadísticas de solicitudes
-    if current_user.role in ("support", "admin"):
-        dept_names = [d.name for d in dept_list]
-        
-        # Total de solicitudes por departamento
-        total_stats = await db.requests.aggregate([
-            {"$match": {"department": {"$in": dept_names}}},
-            {"$group": {"_id": "$department", "total": {"$sum": 1}}},
-        ]).to_list(1000)
-        
-        # Solicitudes abiertas (Pendiente, En progreso, En revisión)
-        open_stats = await db.requests.aggregate([
-            {"$match": {"department": {"$in": dept_names}, "status": {"$in": ["Pendiente", "En progreso", "En revisión"]}}},
-            {"$group": {"_id": "$department", "open": {"$sum": 1}}},
-        ]).to_list(1000)
-        
-        # Solicitudes completadas (Finalizada o Rechazada)
-        completed_stats = await db.requests.aggregate([
-            {"$match": {"department": {"$in": dept_names}, "status": {"$in": ["Finalizada", "Rechazada"]}}},
-            {"$group": {"_id": "$department", "completed": {"$sum": 1}}},
-        ]).to_list(1000)
+    try:
+        # obtener departamentos desde la colección
+        departments = await db.departments.find().to_list(1000)
+        dept_list = [Department(**dept) for dept in departments]
 
-        # Calcular tiempo promedio de resolución por departamento
-        avg_resolution_stats = await db.requests.aggregate([
-            {"$match": {"department": {"$in": dept_names}}},
-            {"$group": {
-                "_id": "$department",
-                "avg_resolution_time": {"$avg": {"$divide": [{"$subtract": ["$completion_date", "$requested_at"]}, 1000 * 60 * 60]}}
-            }}
-        ]).to_list(1000)
+        # Si es support o admin, agregar estadísticas de solicitudes
+        if current_user.role in ("support", "admin"):
+            dept_names = [d.name for d in dept_list]
 
-        # Crear mapas para búsqueda rápida
-        total_map = {item["_id"]: item["total"] for item in total_stats}
-        open_map = {item["_id"]: item["open"] for item in open_stats}
-        completed_map = {item["_id"]: item["completed"] for item in completed_stats}
-        avg_resolution_map = {item["_id"]: round(item["avg_resolution_time"], 2) for item in avg_resolution_stats}
-        
-        # Construir respuesta con estadísticas
-        result = []
-        for dept in dept_list:
-            dept_dict = dept.dict()
-            dept_dict["total"] = total_map.get(dept.name, 0)
-            dept_dict["open"] = open_map.get(dept.name, 0)
-            dept_dict["completed"] = completed_map.get(dept.name, 0)
-            dept_dict["avg_resolution_time"] = avg_resolution_map.get(dept.name, None)
-            result.append(dept_dict)
-        
-        return result
-    
-    return dept_list
+            # Total de solicitudes por departamento
+            total_stats = await db.requests.aggregate([
+                {"$match": {"department": {"$in": dept_names}}},
+                {"$group": {"_id": "$department", "total": {"$sum": 1}}},
+            ]).to_list(1000)
+
+            # Solicitudes abiertas (Pendiente, En progreso, En revisión)
+            open_stats = await db.requests.aggregate([
+                {"$match": {"department": {"$in": dept_names}, "status": {"$in": ["Pendiente", "En progreso", "En revisión"]}}},
+                {"$group": {"_id": "$department", "open": {"$sum": 1}}},
+            ]).to_list(1000)
+
+            # Solicitudes completadas (Finalizada o Rechazada)
+            completed_stats = await db.requests.aggregate([
+                {"$match": {"department": {"$in": dept_names}, "status": {"$in": ["Finalizada", "Rechazada"]}}},
+                {"$group": {"_id": "$department", "completed": {"$sum": 1}}},
+            ]).to_list(1000)
+
+            # Calcular tiempo promedio de resolución por departamento (horas)
+            avg_resolution_stats = await db.requests.aggregate([
+                {"$match": {"department": {"$in": dept_names}}},
+                {"$group": {
+                    "_id": "$department",
+                    "avg_resolution_time": {
+                        "$avg": {
+                            "$divide": [
+                                {"$subtract": ["$completion_date", "$requested_at"]},
+                                1000 * 60 * 60
+                            ]
+                        }
+                    }
+                }}
+            ]).to_list(1000)
+
+            # Crear mapas para búsqueda rápida (proteger si faltan claves)
+            total_map = {item.get("_id"): int(item.get("total", 0)) for item in total_stats if item.get("_id") is not None}
+            open_map = {item.get("_id"): int(item.get("open", 0)) for item in open_stats if item.get("_id") is not None}
+            completed_map = {item.get("_id"): int(item.get("completed", 0)) for item in completed_stats if item.get("_id") is not None}
+
+            # avg_resolution_map seguro (no hacer round(None))
+            avg_resolution_map = {}
+            for item in avg_resolution_stats:
+                _id = item.get("_id")
+                _avg = item.get("avg_resolution_time", None)
+
+                if _id is None:
+                    # ignorar entradas sin id
+                    continue
+
+                if _avg is None:
+                    avg_resolution_map[_id] = None
+                else:
+                    try:
+                        avg_resolution_map[_id] = round(float(_avg), 2)
+                    except Exception:
+                        avg_resolution_map[_id] = None
+
+            # Construir respuesta con estadísticas
+            result = []
+            for dept in dept_list:
+                dept_dict = dept.dict()
+                # usamos el nombre del departamento como clave en los mapas (coincide con tu pipeline)
+                key = dept.name
+                dept_dict["total"] = total_map.get(key, 0)
+                dept_dict["open"] = open_map.get(key, 0)
+                dept_dict["completed"] = completed_map.get(key, 0)
+                dept_dict["avg_resolution_time"] = avg_resolution_map.get(key, None)
+                result.append(dept_dict)
+
+            return result
+
+        # Si no es support/admin devolvemos los departamentos sin estadísticas (como lista de dicts)
+        return [d.dict() for d in dept_list]
+
+    except Exception as e:
+        # Log para debugging en desarrollo; evita crash sin control
+        print("Error en get_departments:", repr(e), flush=True)
+        # Opcional: puedes devolver detalles en entorno de desarrollo; aquí devuelvo 500 genérico
+        raise HTTPException(status_code=500, detail="Error al listar departamentos")
+
 
 # ---- Requests ----
 class TrashItem(BaseModel):
@@ -964,7 +989,44 @@ async def create_request(payload: RequestCreate, current_user: User = Depends(ge
     if not data.get("requested_at"):
         data["requested_at"] = datetime.now(timezone.utc)
 
-    # base
+
+       # normalizar current_user.department a str o List[str] limpias
+    _raw_dept = getattr(current_user, "department", None)
+    dept_to_store = ""
+
+    if _raw_dept is None:
+        dept_to_store = ""
+    elif isinstance(_raw_dept, list):
+        cleaned = []
+        for item in _raw_dept:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                val = item.strip()
+                if val:
+                    cleaned.append(val)
+            elif isinstance(item, dict):
+                # extraer name / department / id
+                name = item.get("name") or item.get("department") or item.get("id")
+                if name is not None:
+                    cleaned.append(str(name))
+            else:
+                cleaned.append(str(item))
+        # si queda vacío -> "", si un elemento -> string, si varios -> lista
+        if len(cleaned) == 0:
+            dept_to_store = ""
+        elif len(cleaned) == 1:
+            dept_to_store = cleaned[0]
+        else:
+            dept_to_store = cleaned
+    elif isinstance(_raw_dept, dict):
+        dept_name = _raw_dept.get("name") or _raw_dept.get("department") or _raw_dept.get("id")
+        dept_to_store = str(dept_name) if dept_name is not None else ""
+    else:
+        # primitivo (str, int, etc.) -> guardar como str
+        dept_to_store = str(_raw_dept)
+
+    # base (usamos dept_to_store ya normalizado)
     new_request = Request(
         title=data["title"],
         description=data["description"],
@@ -973,9 +1035,10 @@ async def create_request(payload: RequestCreate, current_user: User = Depends(ge
         channel=data.get("channel", "Sistema"),
         requester_id=current_user.id,
         requester_name=current_user.full_name,
-        department=current_user.department,
+        department=dept_to_store,
         requested_at=data["requested_at"],
     )
+
 
     # permitir clasificar/asignar en el alta SOLO a admin (mismo permiso que usas para /assign y /classify)
     if current_user.role == "admin":
@@ -1030,24 +1093,42 @@ async def get_requests(
     date_from: Optional[datetime] = Query(None),
     date_to: Optional[datetime] = Query(None),
 ):
+    # 1) construir filtro base (mismo que tenías)
     filt: Dict[str, Any] = {}
     if current_user.role == "employee":
         filt["requester_id"] = current_user.id
-    if status: filt["status"] = status
-    if department: filt["department"] = department
-    if request_type: filt["type"] = request_type
-    if level: filt["level"] = level
-    if assigned_to: filt["assigned_to"] = assigned_to
-    if requester_id: filt["requester_id"] = requester_id
-    if channel: filt["channel"] = channel
+    if status:
+        filt["status"] = status
+    if department:
+        dept_val = department
+        dept_clause = {"$or": [{"department": dept_val}, {"department": {"$in": [dept_val]}}]}
+        if filt:
+            filt = {"$and": [filt, dept_clause]}
+        else:
+            filt.update(dept_clause)
+    if request_type:
+        filt["type"] = request_type
+    if level:
+        filt["level"] = level
+    if assigned_to:
+        filt["assigned_to"] = assigned_to
+    if requester_id:
+        filt["requester_id"] = requester_id
+    if channel:
+        filt["channel"] = channel
     if date_from or date_to:
         dr: Dict[str, Any] = {}
-        if date_from: dr["$gte"] = date_from
-        if date_to: dr["$lte"] = date_to
+        if date_from:
+            dr["$gte"] = date_from
+        if date_to:
+            dr["$lte"] = date_to
         filt["requested_at"] = dr
-    if q: filt["$text"] = {"$search": q}
+    if q:
+        filt["$text"] = {"$search": q}
 
-    sort_field = "created_at"; sort_dir = -1
+    # 2) sort normalization
+    sort_field = "created_at"
+    sort_dir = -1
     if sort:
         if sort.startswith("-"):
             sort_field = sort[1:]; sort_dir = -1
@@ -1056,69 +1137,81 @@ async def get_requests(
     if sort_field not in {"created_at", "status", "department", "requested_at", "priority", "level"}:
         sort_field = "created_at"
 
-    total = await db.requests.count_documents(filt)
-    total_pages = max((total + page_size - 1) // page_size, 1)
-    page = min(page, total_pages)
+    # 3) construir pipeline base que excluye entradas en requests_trash mediante lookup
+    # match -> lookup -> filter deleted empty -> (addFields sort_value ?) -> sort -> skip/limit
+    base_pipeline = []
+    if filt:
+        base_pipeline.append({"$match": filt})
+    # lookup contra requests_trash por campo 'id'
+    base_pipeline.append({
+        "$lookup": {
+            "from": "requests_trash",
+            "localField": "id",
+            "foreignField": "id",
+            "as": "__trash_match"
+        }
+    })
+    # filtrar donde no exista match en trash (deleted)
+    base_pipeline.append({"$match": {"__trash_match.0": {"$exists": False}}})
 
-    # Use aggregation pipeline for priority and status sorting to map to numeric values
+    # 4) contar total con pipeline (misma condición)
+    count_pipeline = list(base_pipeline) + [{"$count": "total"}]
+    count_res = await db.requests.aggregate(count_pipeline).to_list(length=1)
+    total = count_res[0]["total"] if count_res else 0
+
+    total_pages = max((total + page_size - 1) // page_size, 1)
+    page = min(page, total_pages) if total_pages > 0 else 1
+
+    # 5) si sort_field es priority/status agrega la lógica de sort_value
+    pipeline = list(base_pipeline)
     if sort_field in {"priority", "status"}:
-        pipeline = [
-            {"$match": filt},
-            {
-                "$addFields": {
-                    "sort_value": {
-                        "$switch": {
-                            "branches": [
-                                # Priority sorting: Alta=3, Media=2, Baja=1
-                                {
-                                    "case": {"$eq": [sort_field, "priority"]},
-                                    "then": {
-                                        "$cond": [
-                                            {"$eq": ["$priority", "Alta"]}, 3,
-                                            {"$cond": [
-                                                {"$eq": ["$priority", "Media"]}, 2,
-                                                1  # Baja
-                                            ]}
-                                        ]
+        pipeline.append({
+            "$addFields": {
+                "sort_value": {
+                    "$switch": {
+                        "branches": [
+                            {
+                                "case": {"$eq": [sort_field, "priority"]},
+                                "then": {
+                                    "$cond": [
+                                        {"$eq": ["$priority", "Alta"]}, 3,
+                                        {"$cond": [
+                                            {"$eq": ["$priority", "Media"]}, 2,
+                                            1
+                                        ]}
+                                    ]
+                                }
+                            },
+                            {
+                                "case": {"$eq": [sort_field, "status"]},
+                                "then": {
+                                    "$switch": {
+                                        "branches": [
+                                            {"case": {"$eq": ["$status", "Pendiente"]}, "then": 1},
+                                            {"case": {"$eq": ["$status", "En progreso"]}, "then": 2},
+                                            {"case": {"$eq": ["$status", "En revisión"]}, "then": 3},
+                                            {"case": {"$eq": ["$status", "Finalizada"]}, "then": 4},
+                                            {"case": {"$eq": ["$status", "Rechazada"]}, "then": 5},
+                                        ],
+                                        "default": 0
                                     }
-                                },
-                                # Status sorting: Pendiente=1, En progreso=2, En revisión=3, Finalizada=4, Rechazada=5
-                                {
-                                    "case": {"$eq": [sort_field, "status"]},
-                                    "then": {
-                                        "$switch": {
-                                            "branches": [
-                                                {"case": {"$eq": ["$status", "Pendiente"]}, "then": 1},
-                                                {"case": {"$eq": ["$status", "En progreso"]}, "then": 2},
-                                                {"case": {"$eq": ["$status", "En revisión"]}, "then": 3},
-                                                {"case": {"$eq": ["$status", "Finalizada"]}, "then": 4},
-                                                {"case": {"$eq": ["$status", "Rechazada"]}, "then": 5},
-                                            ],
-                                            "default": 0
-                                        }
-                                    }
-                                },
-                            ],
-                            "default": 0
-                        }
+                                }
+                            },
+                        ],
+                        "default": 0
                     }
                 }
-            },
-            {"$sort": {"sort_value": sort_dir}},
-            {"$skip": (page - 1) * page_size},
-            {"$limit": page_size},
-        ]
-        cursor = db.requests.aggregate(pipeline)
-        docs = await cursor.to_list(length=page_size)
+            }
+        })
+        pipeline.append({"$sort": {"sort_value": sort_dir}})
     else:
-        cursor = (
-            db.requests.find(filt)
-            .sort(sort_field, sort_dir)
-            .skip((page - 1) * page_size)
-            .limit(page_size)
-        )
-        docs = await cursor.to_list(length=page_size)
-    
+        pipeline.append({"$sort": {sort_field: sort_dir}})
+
+    pipeline.append({"$skip": (page - 1) * page_size})
+    pipeline.append({"$limit": page_size})
+
+    docs = await db.requests.aggregate(pipeline).to_list(length=page_size)
+
     items = [_to_request(d) for d in docs]
 
     return PaginatedRequests(
@@ -1130,6 +1223,8 @@ async def get_requests(
         has_prev=page > 1,
         has_next=page < total_pages,
     )
+
+
 
 @api_router.post("/requests/{request_id}/classify", response_model=Request)
 async def classify_request(
@@ -1418,13 +1513,24 @@ async def delete_request(
     request_id: str,
     current_user: User = Depends(require_role(["admin"]))
 ):
+    # 1) intentar localizar el documento por id lógico; si no, intentar por _id
     doc = await db.requests.find_one({"id": request_id})
+    objid = None
+    if not doc:
+        try:
+            from bson import ObjectId
+            if ObjectId.is_valid(request_id):
+                objid = ObjectId(request_id)
+                doc = await db.requests.find_one({"_id": objid})
+        except Exception:
+            objid = None
+
     if not doc:
         raise HTTPException(status_code=404, detail="Request not found")
 
     now = datetime.now(timezone.utc)
     trash_doc = {
-        "id": doc["id"],
+        "id": doc.get("id") or str(doc.get("_id")),
         "request_doc": doc,
         "deleted_at": now,
         "deleted_by_id": current_user.id,
@@ -1432,11 +1538,40 @@ async def delete_request(
         "expireAt": now + timedelta(days=TRASH_TTL_DAYS),
     }
 
-    # mover: insertar en trash y borrar del main
-    await db.requests_trash.insert_one(trash_doc)
-    await db.requests.delete_one({"id": request_id})
-    return
+    # 2) insertar en trash y luego borrar del main; si el borrado falla hacemos rollback
+    inserted = None
+    try:
+        inserted = await db.requests_trash.insert_one(trash_doc)
 
+        # intentar borrar por id lógico primero
+        res = await db.requests.delete_one({"id": trash_doc["id"]})
+        if res.deleted_count == 0:
+            # intento fallback por _id si disponemos de ObjectId
+            if objid:
+                res2 = await db.requests.delete_one({"_id": objid})
+                if res2.deleted_count == 0:
+                    # rollback: eliminar lo insertado en trash y devolver error
+                    await db.requests_trash.delete_one({"_id": inserted.inserted_id})
+                    raise HTTPException(status_code=500, detail="No se pudo eliminar la solicitud del repositorio principal (fallback id).")
+            else:
+                # no hay fallback y no se borró: rollback
+                await db.requests_trash.delete_one({"_id": inserted.inserted_id})
+                raise HTTPException(status_code=500, detail="No se pudo eliminar la solicitud del repositorio principal.")
+        # si llegamos aquí el borrado fue exitoso
+        return
+    except HTTPException:
+        # re-lanzar errores controlados
+        raise
+    except Exception as e:
+        # intento de limpieza si insertó pero falló otra cosa
+        try:
+            if inserted:
+                await db.requests_trash.delete_one({"_id": inserted.inserted_id})
+        except Exception:
+            pass
+        # log y devolver 500
+        print("Error en delete_request:", repr(e), flush=True)
+        raise HTTPException(status_code=500, detail="Error al mover la solicitud a la papelera")
 
 
 

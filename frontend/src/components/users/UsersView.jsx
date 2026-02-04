@@ -62,7 +62,6 @@ function UsersView({ users = [], onDeleteUser, onEditUser }) {
   // debug rápido: muestra en consola la forma de los primeros usuarios
   React.useEffect(() => {
     if (!users || users.length === 0) return;
-    console.debug("UsersView: first users preview", users.slice(0, 5));
   }, [users]);
 
   return (

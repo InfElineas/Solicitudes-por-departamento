@@ -10,15 +10,6 @@ import {
 } from "../ui/card";
 
 function DepartmentsView({ departments, users }) {
-  console.log("DepartmentsView departments:", departments);
-  if (Array.isArray(departments)) {
-    console.log("First department:", departments[0]);
-    console.log(
-      "Type of name:",
-      typeof departments[0]?.name,
-      departments[0]?.name,
-    );
-  }
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold text-gray-900">Departamentos</h2>
