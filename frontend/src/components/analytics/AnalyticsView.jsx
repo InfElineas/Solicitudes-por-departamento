@@ -1,5 +1,6 @@
 // src/components/analytics/AnalyticsView.jsx
 import React, { useMemo } from "react";
+import { useTheme } from "next-themes";
 import {
   Card,
   CardContent,
@@ -41,6 +42,8 @@ function AnalyticsView({
     analyticsFilters,
     analyticsPeriod,
   );
+
+  const { resolvedTheme } = useTheme();
 
   const handleChange = (value) => {
     setFilters({ ...filters, ["status"]: value });
@@ -132,7 +135,7 @@ function AnalyticsView({
       {analytics && (
         <>
           {/* Summary Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <SummaryCard
               icon={<FileText className="h-4 w-4 text-muted-foreground" />}
               label="Total de solicitudes"
@@ -263,6 +266,11 @@ function AnalyticsView({
                       label={row.name?.name || row.name || "Sin asignación"}
                       value={row.finished}
                       max={maxFinished}
+                      colorClass={
+                        resolvedTheme === "dark"
+                          ? "bg-slate-400"
+                          : "bg-slate-600"
+                      }
                     />
                   ))
                 ) : (
@@ -433,11 +441,9 @@ function SummaryCard({ icon, label, value, sub, valueClass = "", onClick }) {
   return (
     <Card
       onClick={onClick}
-      className={
-        `${
-          onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""
-        } w-full max-w-[20rem] sm:max-w-none mx-auto`
-      }
+      className={`${
+        onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""
+      } w-full max-w-[20rem] sm:max-w-none mx-auto`}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium">{label}</CardTitle>

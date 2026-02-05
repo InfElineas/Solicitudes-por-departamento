@@ -298,7 +298,7 @@ const RequestsView = ({
         </div>
         <div className="flex flex-wrap items-center gap-3 justify-between sm:justify-end">
           <div
-            className="inline-flex rounded-full border border-slate-200 bg-white shadow-sm p-1 dark:border-slate-800 dark:bg-slate-900"
+            className="inline-flex rounded-full border border-slate-200 bg-white shadow-sm p-1 dark:border-slate-800 dark:bg-slate-900 max-lg:hidden"
             role="group"
             aria-label="Selector de vista"
           >
@@ -374,7 +374,7 @@ const RequestsView = ({
       <div
         className={
           viewMode === "grid"
-            ? "grid gap-4 grid-cols-1 xl:grid-cols-2"
+            ? "grid gap-4 grid-cols-1 lg:grid-cols-2"
             : "grid gap-3 grid-cols-1"
         }
       >
