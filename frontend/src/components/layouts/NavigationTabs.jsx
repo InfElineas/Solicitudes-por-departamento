@@ -1,3 +1,4 @@
+//src/components/layouts/NavigationTabs.jsx
 import React from "react";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText, BarChart3, Users, Building, Trash2 } from "lucide-react";
@@ -35,7 +36,10 @@ const NavigationTabs = ({ user }) => {
             </TabsTrigger>
           )}
 
-          {(user?.role === "support" || user?.role === "admin") && (
+          {/* Usuarios: support/admin o Jefe de departamento */}
+          {(user?.role === "support" ||
+            user?.role === "admin" ||
+            user?.position === "Jefe de departamento") && (
             <TabsTrigger
               value="users"
               className="flex items-center gap-2 whitespace-nowrap"

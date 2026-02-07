@@ -571,7 +571,6 @@ async def migrate_users_department_schema() -> None:
         raise
 
 
-
 async def record_failed_login(username: str, ip: str, window_min: int):
     now = datetime.now(timezone.utc)
     await db.failed_logins.insert_one({
@@ -708,7 +707,18 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 
 # ---- Users ----
 @api_router.post("/users", response_model=User)
-async def create_user(user: UserCreate, current_user: User = Depends(require_role(["admin"]))):
+async def create_user(user: UserCreate, current_user: User = Depends(get_current_user)):
+    """
+    Permite:
+      - admin: crear cualquier usuario.
+      - jefe de departamento (position == "Jefe de departamento"): crear usuarios
+        pero SOLO para departamentos que pertenezcan al jefe.
+      - otros: 403
+    """
+    # permiso: admin o jefe de departamento
+    if not (current_user.role == "admin" or current_user.position == "Jefe de departamento"):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     existing_user = await db.users.find_one({"username": user.username})
     if existing_user:
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -718,13 +728,24 @@ async def create_user(user: UserCreate, current_user: User = Depends(require_rol
 
     # Normalizar department a lista
     departments = normalize_departments(user_dict.get("department"))
-    # Validación de negocio: si no es Jefe no permitir más de 1 departamento
+    # Validación de negocio: si no es Jefe no permitir varios departamentos
     if user_dict.get("position") != "Jefe de departamento" and len(departments) > 1:
         raise HTTPException(status_code=400, detail="Solo los 'Jefe de departamento' pueden tener varios departamentos")
 
-    # Si quieres obligar al menos 1 departamento para todos:
-    # if len(departments) == 0:
-    #     raise HTTPException(status_code=400, detail="Usuario debe tener al menos un departamento")
+    # Si current_user es Jefe (no admin): validar que departments está contenido en su lista
+    if current_user.role != "admin" and current_user.position == "Jefe de departamento":
+        creator_depts = normalize_departments(getattr(current_user, "department", []))
+        # exigir al menos un dept elegido
+        if not departments:
+            raise HTTPException(status_code=400, detail="Debes especificar al menos un departamento para el usuario")
+        # comprobar inclusión
+        for d in departments:
+            if d not in creator_depts:
+                raise HTTPException(status_code=403, detail="No puedes crear usuarios fuera de tus departamentos")
+
+        # además, prevenir creación de admin por parte de jefe
+        if user_dict.get("role") == "admin":
+            raise HTTPException(status_code=403, detail="No autorizado para crear administradores")
 
     user_dict["department"] = departments
 
@@ -748,7 +769,6 @@ class UserUpdate(BaseModel):
 class UserProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     password: Optional[str] = None
-
 
 @api_router.patch("/users/me", response_model=User)
 async def update_my_profile(
@@ -774,33 +794,69 @@ async def update_my_profile(
     updated = await db.users.find_one({"id": current_user.id})
     return load_user_from_doc(updated)
 
-
 @api_router.get("/users", response_model=List[User])
 async def get_users(current_user: User = Depends(get_current_user)):
-    users = await db.users.find().to_list(1000)
-    return [load_user_from_doc(user) for user in users]
+    # Admin / support -> ver todos
+    if current_user.role in ("admin", "support"):
+        users = await db.users.find().to_list(1000)
+        return [load_user_from_doc(u) for u in users]
+
+    # Si es Jefe de departamento -> devolver solo usuarios en sus departamentos
+    if current_user.position == "Jefe de departamento":
+        allowed = normalize_departments(getattr(current_user, "department", []))
+        if not allowed:
+            return []
+        cursor = db.users.find({"department": {"$in": allowed}})
+        users = await cursor.to_list(1000)
+        return [load_user_from_doc(u) for u in users]
+
+    # Si es empleado -> devolver solo su propio registro
+    user_doc = await db.users.find_one({"id": current_user.id})
+    return [load_user_from_doc(user_doc)] if user_doc else []
 
 @api_router.patch("/users/{user_id}", response_model=User)
 async def update_user(
     user_id: str,
     payload: UserUpdate,
-    current_user: User = Depends(require_role(["admin"]))
+    current_user: User = Depends(get_current_user)
 ):
     user_doc = await db.users.find_one({"id": user_id})
     if not user_doc:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    update_data = payload.dict(exclude_unset=True)
-        
-    # Normalizar department (si viene)
+    # Permisos:
+    # - admin: ok
+    # - jefe de departamento: puede editar si el usuario objetivo pertenece a sus departamentos
+    # - otros: solo pueden editar su propio /users/me (handled elsewhere)
+    if current_user.role != "admin":
+        if current_user.position == "Jefe de departamento":
+            allowed = normalize_departments(getattr(current_user, "department", []))
+            target_depts = normalize_departments(user_doc.get("department"))
+            # si no hay intersección => no autorizado
+            if not any(d in allowed for d in target_depts):
+                raise HTTPException(status_code=403, detail="No autorizado para editar este usuario")
+        else:
+            raise HTTPException(status_code=403, detail="Not authorized")
 
+    update_data = payload.dict(exclude_unset=True)
+
+    # Normalizar department (si viene)
     if "department" in update_data:
         update_data["department"] = normalize_departments(update_data["department"])
-        # Determinar la posición válida (si viene en payload, usarla; si no, usar la actual en user_doc)
         position = update_data.get("position") or user_doc.get("position")
         if position != "Jefe de departamento" and len(update_data["department"]) > 1:
             raise HTTPException(status_code=400, detail="Solo los 'Jefe de departamento' pueden tener varios departamentos")
 
+    # Si current user no es admin -> impedir que ponga role "admin"
+    if current_user.role != "admin" and update_data.get("role") == "admin":
+        raise HTTPException(status_code=403, detail="No autorizado para asignar rol admin")
+
+    # Si current user es Jefe -> asegurar que cualquier dept asignado está dentro de sus allowed
+    if current_user.role != "admin" and current_user.position == "Jefe de departamento" and "department" in update_data:
+        creator_depts = normalize_departments(getattr(current_user, "department", []))
+        for d in update_data["department"]:
+            if d not in creator_depts:
+                raise HTTPException(status_code=403, detail="No puedes asignar departamentos fuera de tus ámbitos")
 
     # Si se envió password, reemplazar por password_hash
     if "password" in update_data:
@@ -809,9 +865,8 @@ async def update_user(
             update_data["password_hash"] = get_password_hash(pw)
 
     if not update_data:
-        return User(**user_doc)
+        return load_user_from_doc(user_doc)
 
-    # evitar username duplicado (si se cambia)
     if "username" in update_data:
         exists = await db.users.find_one({
             "username": update_data["username"],
@@ -825,7 +880,6 @@ async def update_user(
     await db.users.update_one({"id": user_id}, {"$set": update_data})
     updated = await db.users.find_one({"id": user_id})
     return load_user_from_doc(updated)
-
 
 
 # ---- Departments ----
@@ -1072,8 +1126,28 @@ async def get_request_detail(
     doc = await db.requests.find_one({"id": request_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Request not found")
-    # Normaliza timestamps a datetime si hiciera falta; si ya están OK, puedes devolver directo
-    return Request(**doc)
+
+    # Permisos: admin/support pueden ver todo
+    if current_user.role in ("admin", "support"):
+        return _to_request(doc)
+
+    # solicitante y asignado pueden ver
+    if doc.get("requester_id") == current_user.id or doc.get("assigned_to") == current_user.id:
+        return _to_request(doc)
+
+    # Jefe de departamento puede ver si el ticket pertenece a sus departamentos
+    if current_user.position == "Jefe de departamento":
+        allowed = normalize_departments(getattr(current_user, "department", []))
+        ticket_dept = doc.get("department")
+        # normalizar ticket_dept como string o list
+        if isinstance(ticket_dept, list):
+            if any(d in allowed for d in ticket_dept):
+                return _to_request(doc)
+        elif isinstance(ticket_dept, str):
+            if ticket_dept in allowed:
+                return _to_request(doc)
+
+    raise HTTPException(status_code=403, detail="Not authorized to view this request")
 
 
 @api_router.get("/requests", response_model=PaginatedRequests)
@@ -1093,10 +1167,23 @@ async def get_requests(
     date_from: Optional[datetime] = Query(None),
     date_to: Optional[datetime] = Query(None),
 ):
-    # 1) construir filtro base (mismo que tenías)
+    # 1) construir filtro base 
     filt: Dict[str, Any] = {}
     if current_user.role == "employee":
         filt["requester_id"] = current_user.id
+    # Si es jefe de departamento (no admin/support) -> solo solicitudes de sus departamentos
+    if current_user.position == "Jefe de departamento" and current_user.role not in ("admin", "support"):
+        allowed_depts = normalize_departments(getattr(current_user, "department", []))
+        if allowed_depts:
+            # department puede ser string o lista en tus documentos, por eso $or
+            dept_clause = {"$or": [{"department": {"$in": allowed_depts}}, {"department": {"$in": [allowed_depts]}}]}
+            if filt:
+                filt = {"$and": [filt, dept_clause]}
+            else:
+                filt.update(dept_clause)
+        else:
+            # Si el jefe no tiene departamentos configurados devolvemos vacío
+            return PaginatedRequests(items=[], page=page, page_size=page_size, total=0, total_pages=1, has_prev=False, has_next=False)    
     if status:
         filt["status"] = status
     if department:
@@ -1609,35 +1696,29 @@ async def purge_trash_request(
         raise HTTPException(status_code=404, detail="No está en papelera")
     return
 
-@api_router.delete("/users/{user_id}", status_code=http_status.HTTP_204_NO_CONTENT)
-async def delete_user(
-    user_id: str,
-    current_user: User = Depends(require_role(["admin"]))
-):
-    if user_id == current_user.id:
-        raise HTTPException(status_code=400, detail="No puedes eliminarte a ti mismo")
-
-    user_doc = await db.users.find_one({"id": user_id})
-    if not user_doc:
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str, current_user: User = Depends(get_current_user)):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    # proteger último admin
-    if user_doc.get("role") == "admin":
-        admins = await db.users.count_documents({"role": "admin"})
-        if admins <= 1:
-            raise HTTPException(status_code=400, detail="No puedes eliminar al último administrador")
+    # admin puede eliminar cualquiera
+    if current_user.role == "admin":
+        await db.users.delete_one({"id": user_id})
+        return {"status": "ok"}
 
-    # evitar dejar tickets abiertos huérfanos
-    open_assigned = await db.requests.count_documents({
-        "assigned_to": user_id,
-        "status": {"$in": list(OPEN_STATES)}
-    })
-    if open_assigned > 0:
-        raise HTTPException(status_code=400, detail="El usuario tiene solicitudes abiertas asignadas")
+    # jefe de departamento puede eliminar solo usuarios de sus depts y no admins
+    if current_user.position == "Jefe de departamento":
+        if target.get("role") == "admin":
+            raise HTTPException(status_code=403, detail="No autorizado para eliminar administradores")
+        allowed = normalize_departments(getattr(current_user, "department", []))
+        target_depts = normalize_departments(target.get("department"))
+        if not any(d in allowed for d in target_depts):
+            raise HTTPException(status_code=403, detail="No autorizado para eliminar este usuario")
+        await db.users.delete_one({"id": user_id})
+        return {"status": "ok"}
 
-    # si llega aquí, eliminar
-    await db.users.delete_one({"id": user_id})
-    return
+    raise HTTPException(status_code=403, detail="Not authorized")
 
 
 # ---- Reportes / Analytics helpers ----

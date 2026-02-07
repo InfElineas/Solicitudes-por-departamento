@@ -160,7 +160,7 @@ function App() {
     return localStorage.getItem("sidebarCollapsed") === "true";
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-
+  const [creatingDeptUser, setCreatingDeptUser] = React.useState(false);
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed));
@@ -541,7 +541,8 @@ function App() {
   const fetchUsers = async () => {
     try {
       const { data } = await api.get("/users");
-      const raw = data;
+      const raw = data || [];
+
       const normalized = raw.map((u) => {
         // Normalizar department -> siempre array de strings
         let deptArray = [];
@@ -550,10 +551,15 @@ function App() {
         } else if (u.department && typeof u.department === "string") {
           deptArray = [u.department];
         } else if (u.department && typeof u.department === "object") {
-          // caso objeto legacy: intentar name/id o stringify
           if (u.department.name) deptArray = [u.department.name];
           else if (u.department.id) deptArray = [u.department.id];
-          else deptArray = [JSON.stringify(u.department)];
+          else {
+            try {
+              deptArray = [JSON.stringify(u.department)];
+            } catch {
+              deptArray = [];
+            }
+          }
         } else {
           deptArray = [];
         }
@@ -563,7 +569,28 @@ function App() {
           department: deptArray,
         };
       });
-      setUsers(normalized);
+
+      // Si el current user es Jefe (y NO es admin/support) filtrar sólo los usuarios de sus deptos
+      const isDeptHead =
+        user?.position === "Jefe de departamento" &&
+        user?.role !== "admin" &&
+        user?.role !== "support";
+      let finalList = normalized;
+      if (isDeptHead) {
+        const allowedDepts = Array.isArray(user?.department)
+          ? user.department
+          : user?.department
+            ? [user.department]
+            : [];
+        finalList = normalized.filter((u) => {
+          // cualquier intersección entre arrays
+          if (!Array.isArray(u.department) || u.department.length === 0)
+            return false;
+          return u.department.some((d) => allowedDepts.includes(d));
+        });
+      }
+
+      setUsers(finalList);
     } catch (error) {
       console.error("Error fetching users:", error);
       if (isUnauthorized(error)) return;
@@ -818,48 +845,97 @@ function App() {
 
   const createDepartmentUser = async (event) => {
     event.preventDefault();
-    const trimmedName = departmentUserForm.full_name.trim();
-    const trimmedEmail = departmentUserForm.email.trim();
+    if (creatingDeptUser) return; // evita dobles envíos
+
+    const trimmedName = (departmentUserForm.full_name || "").trim();
+    const trimmedEmail = (departmentUserForm.email || "").trim().toLowerCase();
     const allowedRoles = ["employee", "support"];
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+    // Validaciones básicas
     if (!trimmedName) {
       toast.error("El nombre es obligatorio");
       return;
     }
-
     if (!emailPattern.test(trimmedEmail)) {
       toast.error("El correo no es válido");
       return;
     }
-
     if (!allowedRoles.includes(departmentUserForm.role)) {
       toast.error("Selecciona un rol permitido");
       return;
     }
 
-    if (!departmentContext.departmentId && !departmentContext.departmentName) {
-      toast.error("No se pudo determinar el departamento del usuario");
+    // Determinar departamento a usar
+    // Prioridad: departmentContext (si viene), luego campo del formulario (si añadiste select), luego departamentos del jefe
+    const allowedDepts = Array.isArray(user?.department)
+      ? user.department
+      : user?.department
+        ? [user.department]
+        : [];
+    let deptToUse = null;
+
+    if (departmentContext?.departmentName) {
+      deptToUse = departmentContext.departmentName;
+    } else if (departmentUserForm.department) {
+      deptToUse = departmentUserForm.department;
+    } else if (allowedDepts.length === 1) {
+      deptToUse = allowedDepts[0];
+    }
+
+    // Si el creador es Jefe de departamento, forzar que deptToUse pertenezca a sus depts
+    const isDeptHead =
+      user?.position === "Jefe de departamento" &&
+      user?.role !== "admin" &&
+      user?.role !== "support";
+    if (isDeptHead) {
+      if (!deptToUse) {
+        toast.error(
+          "Debes seleccionar a qué departamento pertenece el usuario",
+        );
+        return;
+      }
+      if (!allowedDepts.includes(deptToUse)) {
+        toast.error("Solo puedes crear usuarios para tus departamentos");
+        return;
+      }
+    }
+
+    // Si departmentContext no existe y no hay departamento elegido, bloquear
+    if (!deptToUse) {
+      toast.error("No se pudo determinar el departamento del nuevo usuario");
       return;
     }
 
+    // Preparar payload: genera username desde la parte antes del @ y password aleatoria
+    const usernameLocal = trimmedEmail.split("@")[0] || trimmedEmail;
+    const randomPassword =
+      Math.random().toString(36).slice(2, 10) +
+      Math.random().toString(36).slice(2, 6);
+
     const payload = {
+      username: usernameLocal,
+      password: randomPassword,
       full_name: trimmedName,
+      // Backend acepta department string o lista; enviamos string (el backend normaliza)
+      department: deptToUse,
+      position: departmentUserForm.position || "Especialista",
+      // never allow creating admin unless current user is admin
+      role:
+        user?.role === "admin"
+          ? departmentUserForm.role || "employee"
+          : departmentUserForm.role || "employee",
+      // extras (si tu API los acepta)
       email: trimmedEmail,
-      role: departmentUserForm.role,
       is_active: departmentUserForm.status === "active",
     };
 
-    if (departmentContext.departmentId) {
-      payload.department_id = departmentContext.departmentId;
-    }
-
-    if (departmentContext.departmentName) {
-      payload.department = departmentContext.departmentName;
-    }
+    // UX: bloquear botón y mostrar que se está creando
+    setCreatingDeptUser(true);
 
     try {
       await api.post("/users", payload);
+
       toast.success("Usuario creado exitosamente");
       setDepartmentUserDialog(false);
       setDepartmentUserForm({
@@ -867,15 +943,22 @@ function App() {
         email: "",
         role: "employee",
         status: "active",
+        position: "Especialista",
+        department: "",
       });
+
+      // refresca la lista
       await fetchUsers();
     } catch (error) {
       console.error("Error creating department user:", error);
       const message =
         error?.response?.data?.detail ||
         error?.response?.data?.message ||
+        error?.message ||
         "Error al crear usuario";
       toast.error(message);
+    } finally {
+      setCreatingDeptUser(false);
     }
   };
 
@@ -1259,6 +1342,7 @@ function App() {
     .replace(/\s+/g, "_");
 
   const isDepartmentManager =
+    user?.position === "Jefe de departamento" ||
     normalizedRole === "jefe_departamento" ||
     normalizedRole === "department_manager";
 
@@ -1811,49 +1895,78 @@ function App() {
                               {newUser.position === "Jefe de departamento" ? (
                                 <div className="max-h-52 w-full overflow-y-auto p-3 border border-slate-200 dark:border-slate-800 bg-white/5 dark:bg-slate-900/60 rounded-md">
                                   <div className="flex flex-col gap-2">
-                                    {departments?.map((dept) => {
-                                      const checked = (
-                                        newUser.departments || []
-                                      ).includes(dept.name);
-                                      return (
-                                        <label
-                                          key={dept.id}
-                                          className="flex items-start gap-3 py-2 px-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer select-none"
-                                          title={dept.description || dept.name}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            className="mt-1 h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                                            checked={checked}
-                                            onChange={(e) => {
-                                              const current =
-                                                newUser.departments || [];
-                                              const next = e.target.checked
-                                                ? [...current, dept.name]
-                                                : current.filter(
-                                                    (d) => d !== dept.name,
-                                                  );
-                                              setNewUser({
-                                                ...newUser,
-                                                departments: next,
-                                                department: next[0] || "",
-                                              });
-                                            }}
-                                            aria-label={`Seleccionar ${dept.name}`}
-                                          />
-                                          <div className="text-sm">
-                                            <div className="font-medium leading-5">
-                                              {dept.name}
-                                            </div>
-                                            {dept.description && (
-                                              <div className="text-xs text-slate-500 dark:text-slate-400">
-                                                {dept.description}
+                                    {(departments || [])
+                                      .filter((dept) => {
+                                        // permitir todo a admins/support
+                                        if (
+                                          user?.role === "admin" ||
+                                          user?.role === "support"
+                                        )
+                                          return true;
+
+                                        // si current user es Jefe de departamento -> sólo mostrar sus departamentos
+                                        if (
+                                          user?.position ===
+                                          "Jefe de departamento"
+                                        ) {
+                                          const allowed = Array.isArray(
+                                            user.department,
+                                          )
+                                            ? user.department
+                                            : user.department
+                                              ? [user.department]
+                                              : [];
+                                          return allowed.includes(dept.name);
+                                        }
+
+                                        // por defecto permitir (si quieres bloquear otros roles, cambia aquí)
+                                        return true;
+                                      })
+                                      .map((dept) => {
+                                        const checked = (
+                                          newUser?.departments || []
+                                        ).includes(dept.name);
+                                        return (
+                                          <label
+                                            key={dept.id}
+                                            className="flex items-start gap-3 py-2 px-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer select-none"
+                                            title={
+                                              dept.description || dept.name
+                                            }
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              className="mt-1 h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                                              checked={checked}
+                                              onChange={(e) => {
+                                                const current =
+                                                  newUser.departments || [];
+                                                const next = e.target.checked
+                                                  ? [...current, dept.name]
+                                                  : current.filter(
+                                                      (d) => d !== dept.name,
+                                                    );
+                                                setNewUser({
+                                                  ...newUser,
+                                                  departments: next,
+                                                  department: next[0] || "",
+                                                });
+                                              }}
+                                              aria-label={`Seleccionar ${dept.name}`}
+                                            />
+                                            <div className="text-sm">
+                                              <div className="font-medium leading-5">
+                                                {dept.name}
                                               </div>
-                                            )}
-                                          </div>
-                                        </label>
-                                      );
-                                    })}
+                                              {dept.description && (
+                                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                  {dept.description}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </label>
+                                        );
+                                      })}
                                   </div>
                                 </div>
                               ) : (
@@ -1872,14 +1985,36 @@ function App() {
                                     <SelectValue placeholder="Seleccionar..." />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {departments?.map((dept) => (
-                                      <SelectItem
-                                        key={dept.id}
-                                        value={dept.name}
-                                      >
-                                        {dept.name}
-                                      </SelectItem>
-                                    ))}
+                                    {(departments || [])
+                                      .filter((dept) => {
+                                        if (
+                                          user?.role === "admin" ||
+                                          user?.role === "support"
+                                        )
+                                          return true;
+                                        if (
+                                          user?.position ===
+                                          "Jefe de departamento"
+                                        ) {
+                                          const allowed = Array.isArray(
+                                            user.department,
+                                          )
+                                            ? user.department
+                                            : user.department
+                                              ? [user.department]
+                                              : [];
+                                          return allowed.includes(dept.name);
+                                        }
+                                        return true;
+                                      })
+                                      .map((dept) => (
+                                        <SelectItem
+                                          key={dept.id}
+                                          value={dept.name}
+                                        >
+                                          {dept.name}
+                                        </SelectItem>
+                                      ))}
                                   </SelectContent>
                                 </Select>
                               )}
@@ -1933,14 +2068,17 @@ function App() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="employee">
-                                  Empleado
-                                </SelectItem>
+                                {/* admin sólo para administradores del sistema */}
+                                {user?.role === "admin" && (
+                                  <SelectItem value="admin">
+                                    Administrador
+                                  </SelectItem>
+                                )}
                                 <SelectItem value="support">
                                   Soporte Técnico
                                 </SelectItem>
-                                <SelectItem value="admin">
-                                  Administrador
+                                <SelectItem value="employee">
+                                  Empleado
                                 </SelectItem>
                               </SelectContent>
                             </Select>
@@ -2284,46 +2422,68 @@ function App() {
                   {editUser.position === "Jefe de departamento" ? (
                     <div className="max-h-52 w-full overflow-y-auto p-3 border border-slate-200 dark:border-slate-800 bg-white/5 dark:bg-slate-900/60 rounded-md">
                       <div className="flex flex-col gap-2">
-                        {departments?.map((dept) => {
-                          const checked = (editUser.departments || []).includes(
-                            dept.name,
-                          );
-                          return (
-                            <label
-                              key={dept.id}
-                              className="flex items-start gap-3 py-2 px-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer select-none"
-                              title={dept.description || dept.name}
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-1 h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                                checked={checked}
-                                onChange={(e) => {
-                                  const current = editUser.departments || [];
-                                  const next = e.target.checked
-                                    ? [...current, dept.name]
-                                    : current.filter((d) => d !== dept.name);
-                                  setEditUser({
-                                    ...editUser,
-                                    departments: next,
-                                    department: next[0] || "",
-                                  });
-                                }}
-                                aria-label={`Seleccionar ${dept.name}`}
-                              />
-                              <div className="text-sm">
-                                <div className="font-medium leading-5">
-                                  {dept.name}
-                                </div>
-                                {dept.description && (
-                                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                                    {dept.description}
+                        {(departments || [])
+                          .filter((dept) => {
+                            // permitir todo a admins/support
+                            if (
+                              user?.role === "admin" ||
+                              user?.role === "support"
+                            )
+                              return true;
+
+                            // si current user es Jefe de departamento -> sólo mostrar sus departamentos
+                            if (user?.position === "Jefe de departamento") {
+                              const allowed = Array.isArray(user.department)
+                                ? user.department
+                                : user.department
+                                  ? [user.department]
+                                  : [];
+                              return allowed.includes(dept.name);
+                            }
+
+                            // por defecto permitir (si quieres bloquear otros roles, cambia aquí)
+                            return true;
+                          })
+                          .map((dept) => {
+                            const checked = (
+                              editUser?.departments || []
+                            ).includes(dept.name);
+                            return (
+                              <label
+                                key={dept.id}
+                                className="flex items-start gap-3 py-2 px-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer select-none"
+                                title={dept.description || dept.name}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mt-1 h-4 w-4 rounded-sm border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    const current = editUser.departments || [];
+                                    const next = e.target.checked
+                                      ? [...current, dept.name]
+                                      : current.filter((d) => d !== dept.name);
+                                    setEditUser({
+                                      ...editUser,
+                                      departments: next,
+                                      department: next[0] || "",
+                                    });
+                                  }}
+                                  aria-label={`Seleccionar ${dept.name}`}
+                                />
+                                <div className="text-sm">
+                                  <div className="font-medium leading-5">
+                                    {dept.name}
                                   </div>
-                                )}
-                              </div>
-                            </label>
-                          );
-                        })}
+                                  {dept.description && (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                      {dept.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })}
                       </div>
                     </div>
                   ) : (
@@ -2341,11 +2501,33 @@ function App() {
                         <SelectValue placeholder="Seleccionar..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {departments?.map((dept) => (
-                          <SelectItem key={dept.id} value={dept.name}>
-                            {dept.name}
-                          </SelectItem>
-                        ))}
+                        {(departments || [])
+                          .filter((dept) => {
+                            // admin/support ven todos
+                            if (
+                              user?.role === "admin" ||
+                              user?.role === "support"
+                            )
+                              return true;
+
+                            // si current user es Jefe de departamento -> solo sus depts
+                            if (user?.position === "Jefe de departamento") {
+                              const allowed = Array.isArray(user.department)
+                                ? user.department
+                                : user.department
+                                  ? [user.department]
+                                  : [];
+                              return allowed.includes(dept.name);
+                            }
+
+                            // por defecto permitir (ajusta según tu política)
+                            return true;
+                          })
+                          .map((dept) => (
+                            <SelectItem key={dept.id} value={dept.name}>
+                              {dept.name}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   )}
@@ -2395,9 +2577,12 @@ function App() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="employee">Empleado</SelectItem>
+                    {/* admin sólo para administradores del sistema */}
+                    {user?.role === "admin" && (
+                      <SelectItem value="admin">Administrador</SelectItem>
+                    )}
                     <SelectItem value="support">Soporte Técnico</SelectItem>
-                    <SelectItem value="admin">Administrador</SelectItem>
+                    <SelectItem value="employee">Empleado</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
