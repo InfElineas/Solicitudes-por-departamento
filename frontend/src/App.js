@@ -326,6 +326,8 @@ function App() {
     email: "",
     role: "employee",
     status: "active",
+    password: "",
+    department: "",
   });
 
   // departments
@@ -909,13 +911,14 @@ function App() {
 
     // Preparar payload: genera username desde la parte antes del @ y password aleatoria
     const usernameLocal = trimmedEmail.split("@")[0] || trimmedEmail;
-    const randomPassword =
+    const passwordToUse =
+      (departmentUserForm.password && departmentUserForm.password.trim()) ||
       Math.random().toString(36).slice(2, 10) +
-      Math.random().toString(36).slice(2, 6);
+        Math.random().toString(36).slice(2, 6);
 
     const payload = {
       username: usernameLocal,
-      password: randomPassword,
+      password: passwordToUse,
       full_name: trimmedName,
       // Backend acepta department string o lista; enviamos string (el backend normaliza)
       department: deptToUse,
@@ -1360,33 +1363,86 @@ function App() {
     return { departmentId, departmentName, departmentList: deptList };
   }, [user]);
 
-  // TODO: reemplazar por filtrado en backend cuando exista endpoint por departamento.
-  const departmentUsers = useMemo(() => {
-    const { departmentId, departmentName } = departmentContext;
-    if (!departmentId && !departmentName) return users;
-    return users.filter((candidate) => {
-      const candidateDepartmentId =
-        candidate?.department_id ??
-        (typeof candidate?.department === "object"
-          ? candidate?.department?.id
-          : null);
-      const candidateDepartmentName =
-        typeof candidate?.department === "string"
-          ? candidate.department
-          : (candidate?.department?.name ?? candidate?.department_name ?? null);
+  // Inicializar departmentUserForm cuando se abra el diálogo
+  useEffect(() => {
+    if (!departmentUserDialog) return;
 
+    setDepartmentUserForm((prev) => ({
+      ...prev,
+      // si el jefe tiene exactamente 1 depto lo preseleccionamos,
+      // si no, dejamos lo que hubiese ya en el formulario (prev.department)
+      department:
+        Array.isArray(departmentContext?.departmentList) &&
+        departmentContext.departmentList.length === 1
+          ? departmentContext.departmentList[0]
+          : prev.department || "",
+      // opcional: asegurar posición por defecto
+      position: prev.position || "Especialista",
+    }));
+  }, [departmentUserDialog, departmentContext?.departmentList]);
+
+  // TODO: reemplazar por filtrado en backend cuando exista endpoint por departamento.
+  // reemplaza el useMemo actual que calcula departmentUsers
+  const departmentUsers = useMemo(() => {
+    const { departmentId, departmentName, departmentList } = departmentContext;
+    // si no hay contexto, mostrar todo
+    if (
+      !departmentId &&
+      !departmentName &&
+      (!departmentList || departmentList.length === 0)
+    ) {
+      return users;
+    }
+
+    return users.filter((candidate) => {
+      // candidate puede tener: department_id, department (string | array | object), department_name, department?.name
+      const candDeptId =
+        candidate?.department_id ??
+        (candidate?.department &&
+        typeof candidate?.department === "object" &&
+        !Array.isArray(candidate.department)
+          ? candidate.department.id
+          : null);
+
+      // build candidate dept names array (normalized strings)
+      let candDeptNames = [];
+      if (Array.isArray(candidate?.department)) {
+        candDeptNames = candidate.department
+          .map((d) => (d || "").toString().trim())
+          .filter(Boolean);
+      } else if (
+        candidate?.department &&
+        typeof candidate.department === "string"
+      ) {
+        candDeptNames = [candidate.department.trim()];
+      } else if (
+        candidate?.department &&
+        typeof candidate.department === "object"
+      ) {
+        if (candidate.department.name)
+          candDeptNames = [String(candidate.department.name).trim()];
+      } else if (candidate?.department_name) {
+        candDeptNames = [String(candidate.department_name).trim()];
+      }
+
+      // if departmentId present -> compare by id
       if (departmentId) {
-        if (candidateDepartmentId) {
-          return String(candidateDepartmentId) === String(departmentId);
-        }
-        if (departmentName && candidateDepartmentName) {
-          return candidateDepartmentName === departmentName;
+        if (candDeptId) return String(candDeptId) === String(departmentId);
+        // fallback: compare by name if available
+        if (departmentName && candDeptNames.length) {
+          return candDeptNames.includes(departmentName);
         }
         return false;
       }
 
-      if (departmentName && candidateDepartmentName) {
-        return candidateDepartmentName === departmentName;
+      // if no departmentId, but departmentName or departmentList available -> check intersection
+      if (departmentList && departmentList.length) {
+        // any overlap?
+        return candDeptNames.some((n) => departmentList.includes(n));
+      }
+
+      if (departmentName && candDeptNames.length) {
+        return candDeptNames.includes(departmentName);
       }
 
       return false;
@@ -2101,202 +2157,258 @@ function App() {
               )}
 
               {/* Users Tab (Department Manager) */}
-              {isDepartmentManager && (
-                <TabsContent value="users" className="space-y-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
-                        Usuarios del Departamento
-                      </h2>
-                      <p className="text-sm text-gray-500 dark:text-slate-300">
-                        Visualiza y administra usuarios de tu área.
-                      </p>
-                    </div>
-                    <Dialog
-                      open={departmentUserDialog}
-                      onOpenChange={setDepartmentUserDialog}
-                    >
-                      <DialogTrigger asChild>
-                        <Button className="flex items-center space-x-2">
-                          <UserPlus className="h-4 w-4" />
-                          <span>Crear usuario</span>
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>
-                            Crear usuario del departamento
-                          </DialogTitle>
-                          <DialogDescription>
-                            Solo podrás crear usuarios para tu departamento.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <form
-                          onSubmit={createDepartmentUser}
-                          className="space-y-4"
-                        >
-                          <div className="space-y-2">
-                            <Label htmlFor="dept_full_name">
-                              Nombre completo
-                            </Label>
-                            <Input
-                              id="dept_full_name"
-                              value={departmentUserForm.full_name}
-                              onChange={(event) =>
-                                setDepartmentUserForm({
-                                  ...departmentUserForm,
-                                  full_name: event.target.value,
-                                })
-                              }
-                              required
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="dept_email">Correo</Label>
-                            <Input
-                              id="dept_email"
-                              type="email"
-                              value={departmentUserForm.email}
-                              onChange={(event) =>
-                                setDepartmentUserForm({
-                                  ...departmentUserForm,
-                                  email: event.target.value,
-                                })
-                              }
-                              required
-                            />
-                          </div>
-                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <div className="space-y-2">
-                              <Label>Rol</Label>
-                              <Select
-                                value={departmentUserForm.role}
-                                onValueChange={(value) =>
-                                  setDepartmentUserForm({
-                                    ...departmentUserForm,
-                                    role: value,
-                                  })
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="employee">
-                                    Empleado
-                                  </SelectItem>
-                                  <SelectItem value="support">
-                                    Soporte Técnico
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Estado</Label>
-                              <Select
-                                value={departmentUserForm.status}
-                                onValueChange={(value) =>
-                                  setDepartmentUserForm({
-                                    ...departmentUserForm,
-                                    status: value,
-                                  })
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="active">Activo</SelectItem>
-                                  <SelectItem value="inactive">
-                                    Inactivo
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Departamento</Label>
-                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                              {departmentContext.departmentName ||
-                                departmentContext.departmentId ||
-                                "Sin información"}
-                            </div>
-                          </div>
-                          <Button
-                            type="submit"
-                            className="w-full"
-                            disabled={
-                              !departmentContext.departmentId &&
-                              !departmentContext.departmentName
-                            }
-                          >
-                            Crear usuario
-                          </Button>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-
-                  {!departmentContext.departmentId &&
-                    !departmentContext.departmentName && (
-                      <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-                        <AlertTriangle className="mt-0.5 h-4 w-4" />
-                        <div>
-                          <p className="font-medium">
-                            No se pudo determinar el departamento del usuario.
-                          </p>
-                          <p className="text-xs text-amber-900/80 dark:text-amber-100/80">
-                            Los datos se mostrarán sin filtro hasta que se
-                            defina el departamento.
-                          </p>
-                        </div>
+              {isDepartmentManager &&
+                user?.role !== "admin" &&
+                user?.role !== "support" && (
+                  <TabsContent value="users" className="space-y-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">
+                          Usuarios del Departamento
+                        </h2>
+                        <p className="text-sm text-gray-500 dark:text-slate-300">
+                          Visualiza y administra usuarios de tu área.
+                        </p>
                       </div>
-                    )}
+                      <Dialog
+                        open={departmentUserDialog}
+                        onOpenChange={setDepartmentUserDialog}
+                      >
+                        <DialogTrigger asChild>
+                          <Button className="flex items-center space-x-2">
+                            <UserPlus className="h-4 w-4" />
+                            <span>Crear usuario</span>
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>
+                              Crear usuario del departamento
+                            </DialogTitle>
+                            <DialogDescription>
+                              Solo podrás crear usuarios para tu departamento.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <form
+                            onSubmit={createDepartmentUser}
+                            className="space-y-4"
+                          >
+                            <div className="space-y-2">
+                              <Label htmlFor="dept_full_name">
+                                Nombre completo
+                              </Label>
+                              <Input
+                                id="dept_full_name"
+                                value={departmentUserForm.full_name}
+                                onChange={(event) =>
+                                  setDepartmentUserForm({
+                                    ...departmentUserForm,
+                                    full_name: event.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="dept_email">Correo</Label>
+                              <Input
+                                id="dept_email"
+                                type="email"
+                                value={departmentUserForm.email}
+                                onChange={(event) =>
+                                  setDepartmentUserForm({
+                                    ...departmentUserForm,
+                                    email: event.target.value,
+                                  })
+                                }
+                                required
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="dept_password">
+                                Contraseña (opcional)
+                              </Label>
+                              <Input
+                                id="dept_password"
+                                type="password"
+                                value={departmentUserForm.password}
+                                onChange={(e) =>
+                                  setDepartmentUserForm({
+                                    ...departmentUserForm,
+                                    password: e.target.value,
+                                  })
+                                }
+                                placeholder="Si se deja vacío se generará una contraseña"
+                              />
+                            </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardDescription>Total usuarios</CardDescription>
-                        <CardTitle className="text-3xl">
-                          {departmentStats.total}
-                        </CardTitle>
-                      </CardHeader>
-                    </Card>
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardDescription>Activos</CardDescription>
-                        <CardTitle className="text-3xl">
-                          {departmentStats.active}
-                        </CardTitle>
-                      </CardHeader>
-                    </Card>
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardDescription>Inactivos</CardDescription>
-                        <CardTitle className="text-3xl">
-                          {departmentStats.inactive}
-                        </CardTitle>
-                      </CardHeader>
-                    </Card>
-                    {departmentStats.hasCreatedAt && (
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                              <div className="space-y-2">
+                                <Label>Rol</Label>
+                                <Select
+                                  value={departmentUserForm.role}
+                                  onValueChange={(value) =>
+                                    setDepartmentUserForm({
+                                      ...departmentUserForm,
+                                      role: value,
+                                    })
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="employee">
+                                      Empleado
+                                    </SelectItem>
+                                    <SelectItem value="support">
+                                      Soporte Técnico
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Estado</Label>
+                                <Select
+                                  value={departmentUserForm.status}
+                                  onValueChange={(value) =>
+                                    setDepartmentUserForm({
+                                      ...departmentUserForm,
+                                      status: value,
+                                    })
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="active">
+                                      Activo
+                                    </SelectItem>
+                                    <SelectItem value="inactive">
+                                      Inactivo
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Departamento</Label>
+
+                              {/* Si el jefe tiene varios departamentos -> mostrar Select para elegir */}
+                              {Array.isArray(
+                                departmentContext.departmentList,
+                              ) &&
+                              departmentContext.departmentList.length > 1 ? (
+                                <Select
+                                  value={departmentUserForm.department || ""}
+                                  onValueChange={(value) =>
+                                    setDepartmentUserForm({
+                                      ...departmentUserForm,
+                                      department: value,
+                                    })
+                                  }
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Seleccionar..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {departmentContext.departmentList.map(
+                                      (d) => (
+                                        <SelectItem key={d} value={d}>
+                                          {d}
+                                        </SelectItem>
+                                      ),
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                // Si solo hay uno, lo mostramos como texto (como ahora) y precargamos el form
+                                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                                  {departmentContext.departmentName ||
+                                    (departmentContext.departmentList &&
+                                      departmentContext.departmentList[0]) ||
+                                    departmentContext.departmentId ||
+                                    "Sin información"}
+                                </div>
+                              )}
+                            </div>
+
+                            <Button
+                              type="submit"
+                              className="w-full"
+                              disabled={
+                                !departmentContext.departmentId &&
+                                !departmentContext.departmentName
+                              }
+                            >
+                              Crear usuario
+                            </Button>
+                          </form>
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+
+                    {!departmentContext.departmentId &&
+                      !departmentContext.departmentName && (
+                        <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                          <AlertTriangle className="mt-0.5 h-4 w-4" />
+                          <div>
+                            <p className="font-medium">
+                              No se pudo determinar el departamento del usuario.
+                            </p>
+                            <p className="text-xs text-amber-900/80 dark:text-amber-100/80">
+                              Los datos se mostrarán sin filtro hasta que se
+                              defina el departamento.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                       <Card>
                         <CardHeader className="pb-2">
-                          <CardDescription>Nuevos (7 días)</CardDescription>
+                          <CardDescription>Total usuarios</CardDescription>
                           <CardTitle className="text-3xl">
-                            {departmentStats.recent}
+                            {departmentStats.total}
                           </CardTitle>
                         </CardHeader>
                       </Card>
-                    )}
-                  </div>
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardDescription>Activos</CardDescription>
+                          <CardTitle className="text-3xl">
+                            {departmentStats.active}
+                          </CardTitle>
+                        </CardHeader>
+                      </Card>
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardDescription>Inactivos</CardDescription>
+                          <CardTitle className="text-3xl">
+                            {departmentStats.inactive}
+                          </CardTitle>
+                        </CardHeader>
+                      </Card>
+                      {departmentStats.hasCreatedAt && (
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardDescription>Nuevos (7 días)</CardDescription>
+                            <CardTitle className="text-3xl">
+                              {departmentStats.recent}
+                            </CardTitle>
+                          </CardHeader>
+                        </Card>
+                      )}
+                    </div>
 
-                  <UsersView
-                    users={departmentUsers}
-                    onDeleteUser={deleteUser}
-                    onEditUser={openEditUser}
-                  />
-                </TabsContent>
-              )}
+                    <UsersView
+                      users={departmentUsers}
+                      onDeleteUser={deleteUser}
+                      onEditUser={openEditUser}
+                    />
+                  </TabsContent>
+                )}
 
               {/* Departments Tab (Admin only) */}
               {(user?.role === "support" || user?.role === "admin") && (
