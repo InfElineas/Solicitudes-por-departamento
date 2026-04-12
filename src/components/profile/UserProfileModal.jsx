@@ -1,4 +1,5 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
+import { supabase } from '@/api/supabaseClient';
 import { base44 } from '@/api/base44Client';
 import { Camera, Lock, Building2, Save, X, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,6 +10,7 @@ const labelCls = "text-xs font-medium text-gray-400 mb-1 block";
 
 const AVATAR_COLORS = ['bg-pink-500', 'bg-blue-500', 'bg-purple-500', 'bg-green-500', 'bg-orange-500', 'bg-cyan-500', 'bg-red-500', 'bg-yellow-500'];
 
+/** @param {{ user: any, departments?: any[], onClose: () => void, onSaved?: (updated: any) => void }} props */
 export default function UserProfileModal({ user, departments = [], onClose, onSaved }) {
   const [tab, setTab] = useState('profile');
   const [name, setName] = useState(user?.display_name || user?.full_name || '');
@@ -16,20 +18,19 @@ export default function UserProfileModal({ user, departments = [], onClose, onSa
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || '');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const fileRef = useRef();
+  const fileRef = useRef(/** @type {HTMLInputElement|null} */ (null));
 
   const initials = name
-    ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    ? name.split(' ').map((/** @type {string} */ n) => n[0]).join('').toUpperCase().slice(0, 2)
     : (user?.email?.[0] || '?').toUpperCase();
   const avatarColor = AVATAR_COLORS[(user?.email?.charCodeAt(0) || 0) % AVATAR_COLORS.length];
 
-  const handleAvatarUpload = async (e) => {
+  const handleAvatarUpload = async (/** @type {import('react').ChangeEvent<HTMLInputElement>} */ e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) { toast.error('Solo se permiten imágenes'); return; }
@@ -38,6 +39,8 @@ export default function UserProfileModal({ user, departments = [], onClose, onSa
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
       setAvatarUrl(file_url);
       toast.success('Imagen cargada');
+    } catch {
+      toast.error('Error al subir imagen');
     } finally {
       setUploadingAvatar(false);
     }
@@ -46,26 +49,35 @@ export default function UserProfileModal({ user, departments = [], onClose, onSa
   const handleSaveProfile = async () => {
     if (!name.trim()) { toast.error('El nombre no puede estar vacío'); return; }
     setSaving(true);
-    // Save display_name on the User entity (custom field, not read-only like full_name from Google)
-    await base44.entities.User.update(user.id, { display_name: name, department, avatar_url: avatarUrl });
-    toast.success('Perfil actualizado');
-    setSaving(false);
-    onSaved?.({ display_name: name, full_name: name, department, avatar_url: avatarUrl });
+    try {
+      const { error } = await supabase
+        .from('app_users')
+        .update({ display_name: name.trim(), department, avatar_url: avatarUrl })
+        .eq('id', user.id);
+      if (error) throw error;
+      toast.success('Perfil actualizado');
+      onSaved?.({ display_name: name.trim(), full_name: name.trim(), department, avatar_url: avatarUrl });
+    } catch (/** @type {any} */ err) {
+      toast.error('Error al guardar: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleChangePassword = async () => {
-    if (!newPassword || newPassword.length < 6) { toast.error('La contraseña debe tener al menos 6 caracteres'); return; }
+    if (!newPassword || newPassword.length < 6) { toast.error('Mínimo 6 caracteres'); return; }
     if (newPassword !== confirmPassword) { toast.error('Las contraseñas no coinciden'); return; }
     setSaving(true);
     try {
-      // Base44 auth: update password via updateMe with password field
-      await base44.auth.updateMe({ password: newPassword });
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
       toast.success('Contraseña actualizada correctamente');
-      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-    } catch (err) {
-      toast.error('No se pudo cambiar la contraseña');
+      setNewPassword(''); setConfirmPassword('');
+    } catch (/** @type {any} */ err) {
+      toast.error('Error: ' + err.message);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const tabs = [
@@ -75,8 +87,15 @@ export default function UserProfileModal({ user, departments = [], onClose, onSa
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="rounded-xl w-full max-w-md shadow-2xl" style={{ background: 'hsl(222,47%,13%)', border: '1px solid hsl(217,33%,22%)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="rounded-xl w-full max-w-md shadow-2xl"
+        style={{ background: 'hsl(222,47%,13%)', border: '1px solid hsl(217,33%,22%)' }}
+        onClick={e => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b" style={{ borderColor: 'hsl(217,33%,22%)' }}>
           <h3 className="text-base font-semibold text-white">Mi Perfil</h3>

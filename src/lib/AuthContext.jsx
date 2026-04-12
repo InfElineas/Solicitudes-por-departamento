@@ -44,6 +44,28 @@ function buildUserObject(supabaseUser, profile) {
   };
 }
 
+/** @param {any} supabaseUser */
+async function loadProfile(supabaseUser, setUser, setIsAuthenticated) {
+  try {
+    const profile = await ensureUserProfile(supabaseUser);
+    setUser(profile);
+    setIsAuthenticated(true);
+  } catch (/** @type {any} */ err) {
+    console.warn('[AuthContext] ensureUserProfile error:', err?.message);
+    setUser({
+      id: supabaseUser.id,
+      email: supabaseUser.email,
+      full_name: supabaseUser.user_metadata?.full_name || supabaseUser.email,
+      display_name: supabaseUser.user_metadata?.full_name || supabaseUser.email,
+      role: 'employee',
+      department: '',
+      department_id: '',
+      avatar_url: '',
+    });
+    setIsAuthenticated(true);
+  }
+}
+
 /** @param {{ children: import('react').ReactNode }} props */
 export const AuthProvider = ({ children }) => {
   /** @type {[any, import('react').Dispatch<any>]} */
@@ -54,54 +76,45 @@ export const AuthProvider = ({ children }) => {
   const [authError] = useState(/** @type {any} */ (null));
 
   useEffect(() => {
-    let initialDone = false;
+    let isMounted = true;
 
-    // Safety fallback: if Supabase never fires INITIAL_SESSION in 5s, unblock the UI
-    const safetyTimer = setTimeout(() => {
-      console.warn('[AuthContext] Timeout: Supabase no respondió en 5s.');
-      if (!initialDone) {
-        initialDone = true;
-        setIsLoadingAuth(false);
-      }
-    }, 5000);
-
-    // Single source of truth: onAuthStateChange fires INITIAL_SESSION on mount
-    // with the stored session (if any), so we never need a separate getSession() call.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        try {
-          const profile = await ensureUserProfile(session.user);
-          setUser(profile);
-          setIsAuthenticated(true);
-        } catch (/** @type {any} */ err) {
-          console.warn('[AuthContext] ensureUserProfile error:', err?.message);
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || session.user.email,
-            display_name: session.user.user_metadata?.full_name || session.user.email,
-            role: 'employee',
-            department: '',
-            department_id: '',
-            avatar_url: '',
-          });
-          setIsAuthenticated(true);
+    // ── Paso 1: carga inicial ────────────────────────────────────────────────
+    // getSession() espera el refresh automático del token antes de resolver,
+    // así que nunca devuelve null para una sesión válida aunque el access
+    // token haya expirado. Esto evita el redirect falso al recargar.
+    supabase.auth.getSession()
+      .then(async ({ data: { session } }) => {
+        if (!isMounted) return;
+        if (session?.user) {
+          await loadProfile(session.user, setUser, setIsAuthenticated);
         }
-      } else {
+      })
+      .catch((/** @type {any} */ err) => {
+        console.warn('[AuthContext] getSession error:', err?.message);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingAuth(false);
+      });
+
+    // ── Paso 2: escuchar cambios posteriores ─────────────────────────────────
+    // Ignoramos INITIAL_SESSION porque ya lo resuelve getSession() arriba.
+    // Solo reaccionamos a login, logout y refresh de token.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.user) {
+          await loadProfile(session.user, setUser, setIsAuthenticated);
+        }
+      } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setIsAuthenticated(false);
       }
-
-      // Stop loading spinner after the first event (INITIAL_SESSION) resolves
-      if (!initialDone) {
-        initialDone = true;
-        clearTimeout(safetyTimer);
-        setIsLoadingAuth(false);
-      }
+      // INITIAL_SESSION se ignora — gestionado por getSession() arriba
     });
 
     return () => {
-      clearTimeout(safetyTimer);
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -113,7 +126,8 @@ export const AuthProvider = ({ children }) => {
     window.location.href = '/login';
   };
 
-  const updateUser = (/** @type {Record<string, any>} */ updated) => setUser((/** @type {any} */ u) => ({ ...u, ...updated }));
+  const updateUser = (/** @type {Record<string, any>} */ updated) =>
+    setUser((/** @type {any} */ u) => ({ ...u, ...updated }));
 
   const navigateToLogin = () => { window.location.href = '/login'; };
 
@@ -121,9 +135,7 @@ export const AuthProvider = ({ children }) => {
     setIsLoadingAuth(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
-      const profile = await ensureUserProfile(session.user);
-      setUser(profile);
-      setIsAuthenticated(true);
+      await loadProfile(session.user, setUser, setIsAuthenticated);
     }
     setIsLoadingAuth(false);
   };
