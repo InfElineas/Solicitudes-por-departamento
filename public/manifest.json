@@ -1,0 +1,10 @@
+{
+  "name": "Solicitudes de Automatización",
+  "short_name": "Solicitudes",
+  "description": "Sistema de gestión de solicitudes de automatización",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": []
+}
